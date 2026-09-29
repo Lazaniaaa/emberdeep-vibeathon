@@ -1,0 +1,121 @@
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import { NO_PERKS } from "@/game/catalog";
+import { emptyBag, startRun } from "@/game/run";
+import { useGame } from "./store";
+
+const saved = new Map<string, string>();
+const storage = {
+  getItem: (name: string) => saved.get(name) ?? null,
+  setItem: (name: string, value: string) => { saved.set(name, value); },
+  removeItem: (name: string) => { saved.delete(name); },
+};
+let useRun: typeof import("./run-store").useRun;
+let validSavedRun: typeof import("./run-store").validSavedRun;
+let settle: typeof import("./run-store").settle;
+
+beforeAll(async () => {
+  vi.stubGlobal("sessionStorage", storage);
+  ({ useRun, validSavedRun, settle } = await import("./run-store"));
+});
+
+describe("active run recovery", () => {
+  it("restores and continues a run after rehydration", async () => {
+    useRun.getState().start({ seed: 7, flasks: 2, perks: NO_PERKS, weaponDamage: 1, bag: emptyBag() });
+    useRun.getState().act({ type: "wait" });
+    const before = useRun.getState().run;
+    const snapshot = saved.get("emberdeep-run-v1");
+    expect(snapshot).toBeTruthy();
+
+    useRun.getState().clear();
+    saved.set("emberdeep-run-v1", snapshot!);
+    await useRun.persist.rehydrate();
+    expect(useRun.getState().run).toEqual(before);
+    useRun.getState().act({ type: "wait" });
+    expect(useRun.getState().run?.steps).toBe((before?.steps ?? 0) + 1);
+    useRun.getState().clear();
+  });
+
+  it("drops a malformed run instead of crashing during rehydration", async () => {
+    saved.set("emberdeep-run-v1", JSON.stringify({ state: { run: { floor: null } }, version: 0 }));
+    await useRun.persist.rehydrate();
+    expect(useRun.getState().run).toBeNull();
+  });
+});
+
+describe("saved run validation", () => {
+  const good = () => JSON.parse(JSON.stringify(startRun({ seed: 7, flasks: 2, perks: NO_PERKS, weaponDamage: 1, bag: emptyBag() })));
+
+  it("accepts a complete run and rejects saves with holes in nested data", () => {
+    expect(validSavedRun(good())).toBe(true);
+    const holes: [string, (r: Record<string, any>) => void][] = [
+      ["no stairs", r => { r.floor.stairs = null; }],
+      ["stairs off the map", r => { r.floor.stairs = { x: 99, y: 3 }; }],
+      ["stairs inside a wall", r => { r.floor.stairs = { x: 0, y: 0 }; }],
+      ["null item", r => { r.floor.items = [null]; }],
+      ["unknown item kind", r => { r.floor.items = [{ id: 1, x: 3, y: 3, kind: "bomb" }]; }],
+      ["item without id", r => { r.floor.items = [{ x: 3, y: 3, kind: "gold" }]; }],
+      ["dimling without health", r => { r.floor.dimlings = [{ id: 1, x: 3, y: 3, awake: false }]; }],
+      ["oversized dimling", r => { r.floor.dimlings = [{ id: 1, x: 3, y: 3, hp: 5, maxHp: 5, awake: false, size: 9 }]; }],
+      ["boss hanging off the edge", r => { r.floor.dimlings = [{ id: 1, x: 26, y: 16, hp: 5, maxHp: 5, awake: false, size: 2 }]; }],
+      ["bad theme", r => { r.floor.theme = "lava"; }],
+      ["floor from another depth", r => { r.floor.depth = 5; }],
+      ["seen with junk", r => { r.floor.seen[3] = 7; }],
+      ["log with junk", r => { r.messages = [1, 2]; }],
+      ["runId as number", r => { r.runId = 12; }],
+    ];
+    for (const [name, damage] of holes) {
+      const run = good();
+      damage(run);
+      expect(validSavedRun(run), name).toBe(false);
+    }
+  });
+});
+
+describe("booking a descent", () => {
+  it("banks the result the moment the descent ends, and only once", () => {
+    useGame.getState().reset();
+    expect(useGame.getState().payForRun()).toBe(true);
+    const paid = useGame.getState();
+    useRun.getState().start({ seed: 7, flasks: 2, perks: NO_PERKS, weaponDamage: 1, bag: { ...paid.carried }, runId: paid.runId ?? undefined });
+    useRun.setState({ run: { ...useRun.getState().run!, gold: 50, crystals: 4 } });
+
+    useRun.getState().act({ type: "extract" });
+    const after = useGame.getState();
+    expect(after.runSpent).toBe(0);
+    expect(after.runId).toBeNull();
+    expect(after.roundGold).toBe(50);
+    expect(after.crystals).toBe(4);
+    expect(after.lastReport?.outcome).toBe("extracted");
+
+    // The result screen may sit open, be reloaded or be settled again; nothing is counted twice.
+    settle(useRun.getState().run!);
+    settle(useRun.getState().run!);
+    expect(useGame.getState().roundGold).toBe(50);
+    expect(useGame.getState().stats.runs).toBe(1);
+    useRun.getState().clear();
+    useGame.getState().reset();
+  });
+
+  it("does not let an old result settle a newer payment", () => {
+    useGame.getState().reset();
+    useGame.getState().payForRun();
+    const first = useGame.getState();
+    useRun.getState().start({ seed: 7, flasks: 2, perks: NO_PERKS, weaponDamage: 1, bag: { ...first.carried }, runId: first.runId ?? undefined });
+    const oldRun = { ...useRun.getState().run!, status: "extracted" as const, gold: 400 };
+    useRun.getState().clear();
+
+    // Another tab abandoned it and paid for a new descent before the old result arrived.
+    useGame.getState().abandonRun();
+    useGame.getState().payForRun();
+    const secondId = useGame.getState().runId;
+    expect(secondId).not.toBe(first.runId);
+
+    settle(oldRun);
+    const after = useGame.getState();
+    expect(after.runSpent).toBeGreaterThan(0);
+    expect(after.runId).toBe(secondId);
+    expect(after.roundGold).toBe(0);
+    useGame.getState().reset();
+  });
+});
+

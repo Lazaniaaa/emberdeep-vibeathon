@@ -1,0 +1,197 @@
+import { Flame, KeyRound, Minus, Plus } from "lucide-react";
+import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { playSfx } from "@/audio/sfx";
+import { BURN_SHARE, FLASK_LIGHT, FLASK_PRICE, KEY_PRICE, MAX_FLASKS, MAX_KEYS, PASSES, RAFFLE_SHARE } from "@/game/config";
+import { ARMORS, POTIONS, POTION_IDS, WEAPONS } from "@/game/catalog";
+import { ticketChance } from "@/game/raffle";
+import { randomSeed } from "@/game/rng";
+import { rf, usd } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import { useRun } from "@/state/run-store";
+import { activePass, computeRunPerks, useGame, type HeroChoice } from "@/state/store";
+import { InsufficientFunds } from "@/state/store";
+import { foreignRunActive } from "@/state/run-lock";
+import { useFriendContext, useWallet } from "@/state/wallet";
+import { FriendPanel } from "./friend-panel";
+import { WANDERER, friendVisual, nftVisual, prizeVisual, type HeroVisual } from "./hero-info";
+import { HeroAvatar, ItemArt } from "./art";
+import { PixelSprite } from "./pixel-sprite";
+
+export function DescendTab() {
+  const game = useGame();
+  const wallet = useWallet();
+  const friend = useFriendContext();
+  const start = useRun(s => s.start);
+
+  const perks = computeRunPerks(game, friend);
+  const pass = activePass(game);
+  const drop = ticketChance(pass);
+  const cost = game.flasks * FLASK_PRICE;
+  const light = game.flasks * FLASK_LIGHT + perks.startLight;
+  const weapon = WEAPONS[game.weapon];
+
+  const heroChoices: { choice: HeroChoice; visual: HeroVisual; key: string }[] = [
+    { choice: { kind: "wanderer" }, visual: WANDERER, key: "wanderer" },
+  ];
+  if (friend.hasFriend && wallet.selected !== null) {
+    heroChoices.push({ choice: { kind: "friend" }, visual: friendVisual(wallet.selected, wallet.sprite), key: "friend" });
+  }
+  for (const h of game.heroes) heroChoices.push({ choice: { kind: "nft", id: h.id }, visual: nftVisual(h), key: h.id });
+  for (const p of game.prizes) heroChoices.push({ choice: { kind: "prize", serial: p.serial }, visual: prizeVisual(p), key: `prize-${p.serial}` });
+
+  const isSelected = (c: HeroChoice) => {
+    if (c.kind !== game.hero.kind) return false;
+    if (c.kind === "nft" && game.hero.kind === "nft") return c.id === game.hero.id;
+    if (c.kind === "prize" && game.hero.kind === "prize") return c.serial === game.hero.serial;
+    return true;
+  };
+  const selectedValid = heroChoices.some(h => isSelected(h.choice));
+  const friendPerkPending = selectedValid && game.hero.kind === "friend" && !wallet.sprite;
+
+  const buyKeys = (count: number) => {
+    try {
+      game.buyKey(count);
+      playSfx("buy", useGame.getState().muted);
+      toast.success(`${count} entry key${count > 1 ? "s" : ""} bought.`);
+    } catch (e) {
+      toast.error(e instanceof InsufficientFunds ? `Not enough RF for ${count} key${count > 1 ? "s" : ""}.` : "You are holding as many keys as you can.");
+    }
+  };
+
+  const descend = () => {
+    if (friendPerkPending) {
+      toast.error("Wait for your Rare Friend's family perk to load, or choose Wanderer.");
+      return;
+    }
+    if (foreignRunActive()) {
+      toast.error("A descent is already running in another tab. Finish it there first.");
+      return;
+    }
+    if (!selectedValid) game.selectHero({ kind: "wanderer" });
+    // A tab closed mid-descent loses the run but not the paid flag; count it as lost so play can go on.
+    if (useGame.getState().runSpent > 0 && !useRun.getState().run) {
+      game.abandonRun();
+      toast("Your last descent was lost when the page closed. Its key and oil are gone.");
+    }
+    if (useGame.getState().keys < 1) {
+      toast.error(`You need an entry key (${KEY_PRICE} RF). Buy one below.`);
+      return;
+    }
+    if (!game.payForRun()) {
+      toast.error(`You need ${cost} RF for ${game.flasks} flask${game.flasks > 1 ? "s" : ""}. Top up in the Vault.`);
+      return;
+    }
+    playSfx("burn", game.muted);
+    const state = useGame.getState();
+    start({
+      seed: randomSeed(),
+      flasks: state.flasks,
+      perks: computeRunPerks(state, friend),
+      ticketChance: ticketChance(activePass(state)),
+      weaponDamage: WEAPONS[state.weapon].damage,
+      bag: { ...state.carried },
+      runId: state.runId ?? undefined,
+    });
+  };
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+      <Card>
+        <CardHeader>
+          <CardTitle className="font-pixel">Choose who descends</CardTitle>
+          <CardDescription>Every character has a base perk. Mint more at the Altar or find a Soul Sigil in a Sealed Vault.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Character">
+            {heroChoices.map(({ choice, visual, key }) => {
+              const active = isSelected(choice) || (!selectedValid && choice.kind === "wanderer");
+              return (
+                <button
+                  key={key}
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => game.selectHero(choice)}
+                  className={cn(
+                    "group flex flex-col items-center gap-2 rounded-lg border bg-black/40 p-3 text-center transition-colors outline-none focus-visible:ring-2 focus-visible:ring-lime",
+                    active ? "border-lime bg-lime/[0.07]" : "border-white/10 hover:border-white/30",
+                  )}
+                >
+                  {visual.portrait
+                    ? <HeroAvatar portrait={visual.portrait} px={4} />
+                    : <PixelSprite mask={visual.mask("down")} px={3} color="#F5F5F5" halo="#000" />}
+                  <span className="font-pixel text-[11px] leading-tight" style={{ color: visual.color }}>{visual.name}</span>
+                  <span className="text-[10px] tracking-wide text-muted-foreground uppercase">{visual.subtitle}</span>
+                  <span className="text-xs text-foreground/80">{visual.perk}</span>
+                </button>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="space-y-4">
+        <FriendPanel />
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="font-pixel">Entry keys</CardTitle>
+            <CardDescription>
+              One key opens one descent and is spent when you light the lantern. A key costs {KEY_PRICE} RF ({usd(KEY_PRICE)}), split like every other spend: {Math.round(BURN_SHARE * 100)}% burned, {Math.round(RAFFLE_SHARE * 100)}% to the Friend lot, the rest into this round's reward pool.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <KeyRound className="size-5 text-gold" />
+              <span className="font-pixel text-2xl text-gold" aria-live="polite">{game.keys}</span>
+              <span className="text-xs text-muted-foreground">held (max {MAX_KEYS})</span>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => buyKeys(1)} disabled={game.rf < KEY_PRICE || game.keys + 1 > MAX_KEYS}>Buy 1 · {rf(KEY_PRICE)} RF</Button>
+              <Button variant="outline" size="sm" onClick={() => buyKeys(5)} disabled={game.rf < KEY_PRICE * 5 || game.keys + 5 > MAX_KEYS}>Buy 5 · {rf(KEY_PRICE * 5)} RF</Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="font-pixel">Lantern oil</CardTitle>
+            <CardDescription>
+              Each flask costs {FLASK_PRICE} RF and gives {FLASK_LIGHT} light. More light, wider vision. {Math.round(BURN_SHARE * 100)}% is burned, {Math.round(RAFFLE_SHARE * 100)}% buys the weekly Friend lot. Finds drop a raffle ticket {Math.round(drop * 1000) / 10}% of the time{pass ? ` (${PASSES[pass].name})` : ""}. Carry it home or lose it.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="icon" aria-label="Fewer flasks" onClick={() => game.setFlasks(game.flasks - 1)} disabled={game.flasks <= 1}><Minus /></Button>
+                <span className="w-16 text-center font-pixel text-2xl text-lime" aria-live="polite">{game.flasks}</span>
+                <Button variant="outline" size="icon" aria-label="More flasks" onClick={() => game.setFlasks(game.flasks + 1)} disabled={game.flasks >= MAX_FLASKS}><Plus /></Button>
+              </div>
+              <div className="text-right">
+                <div className="font-pixel text-sm">{cost} RF <span className="font-sans text-xs text-muted-foreground">{usd(cost)}</span></div>
+                <div className="text-xs text-muted-foreground">{light} light · burns {rf(cost * BURN_SHARE)} · lot {rf(cost * RAFFLE_SHARE)}</div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              <Badge variant="outline"><ItemArt id={game.weapon} px={1} /> {weapon.name} ({weapon.damage} dmg)</Badge>
+              {game.armor !== "none" && <Badge variant="outline"><ItemArt id={game.armor} px={1} /> {ARMORS[game.armor].name}</Badge>}
+              {POTION_IDS.filter(id => game.potions[id] > 0).map(id => (
+                <Badge key={id} variant="outline"><ItemArt id={id} px={1} /> {POTIONS[id].name} ×{game.potions[id]}</Badge>
+              ))}
+            </div>
+
+            <Button size="lg" className="h-12 w-full font-pixel text-base" onClick={descend} disabled={cost > game.rf || game.keys < 1 || friendPerkPending}>
+              <Flame data-icon="inline-start" /> Light it and descend
+            </Button>
+            {game.keys < 1 && <p className="text-xs text-destructive">No entry key. Buy one to descend.</p>}
+            {cost > game.rf && <p className="text-xs text-destructive">Not enough RF. Grab a simulated top-up in the Vault.</p>}
+            {friendPerkPending && <p className="text-xs text-muted-foreground">Wait for your Rare Friend's family perk, or choose Wanderer.</p>}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
