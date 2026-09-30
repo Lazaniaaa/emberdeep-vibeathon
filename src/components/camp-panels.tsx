@@ -62,6 +62,7 @@ export function HallPanel() {
     ["Bosses slain", `${g.stats.bosses}`],
     ["Best round claim", g.stats.bestPayout ? `${rf(g.stats.bestPayout)} RF` : "-"],
     ["Delvers minted", `${g.stats.mints}`],
+    ["Expeditions completed", `${g.stats.expeditions}`],
     ["Friends won", `${g.prizes.length}`],
     ["Burned by you", `${rf(g.burned)} RF`],
     ["This round", g.roundGold > 0 ? `${g.roundGold} gold · ${percent(share)} of the gold` : "no gold banked yet"],

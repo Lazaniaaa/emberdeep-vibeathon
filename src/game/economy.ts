@@ -1,4 +1,6 @@
-import { BURN_SHARE, LOCK_SHARE, POOL_SHARE, RAFFLE_SHARE, RARITY_SUPPLY, SIGIL_RARITY_WEIGHTS, WORLD_MINT_SEED } from "./config";
+import {
+  BURN_SHARE, EXPEDITION_BURN, EXPEDITION_LOT, LOCK_SHARE, POOL_SHARE, RAFFLE_SHARE, RARITY_SUPPLY, SIGIL_RARITY_WEIGHTS, WORLD_MINT_SEED,
+} from "./config";
 import { CLASS_IDS, type HeroNft, type Rarity } from "./catalog";
 import { createRng, pick, randomSeed, weighted } from "./rng";
 
@@ -38,9 +40,16 @@ export function splitSpend(amount: number) {
   return { burned, raffle, locked, pooled: round(amount - burned - raffle - locked) };
 }
 
-export function applySpend(ledger: Ledger, amount: number): Ledger {
+/** Expeditions split their price their own way: mostly burned, the rest to the round pool and the Friend lot. */
+export function splitExpeditionSpend(amount: number) {
+  const burned = round(amount * EXPEDITION_BURN);
+  const raffle = round(amount * EXPEDITION_LOT);
+  return { burned, raffle, locked: 0, pooled: round(amount - burned - raffle) };
+}
+
+export function applySpend(ledger: Ledger, amount: number, split = splitSpend(amount)): Ledger {
   if (amount > ledger.rf + 1e-9) throw new Error("Not enough RF");
-  const { burned, pooled, raffle, locked } = splitSpend(amount);
+  const { burned, pooled, raffle, locked } = split;
   return {
     rf: round(ledger.rf - amount),
     pool: round(ledger.pool + pooled),

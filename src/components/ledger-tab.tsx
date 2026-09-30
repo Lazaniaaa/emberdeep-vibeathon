@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { ACTIVE_SHARE, BURN_SHARE, FAUCET_AMOUNT, FIELD_WEEK_SPEND, KEY_PRICE, LOCK_SHARE, MAX_ROUND_RETURN, POOL_SHARE, RAFFLE_SHARE } from "@/game/config";
+import { ACTIVE_SHARE, BURN_SHARE, EXPEDITION_BURN, EXPEDITION_LOT, EXPEDITION_POOL, FAUCET_AMOUNT, FIELD_WEEK_SPEND, KEY_PRICE, LOCK_SHARE, MAX_ROUND_RETURN, POOL_SHARE, RAFFLE_SHARE } from "@/game/config";
 import { roundShare } from "@/game/economy";
 import { percent, rf, usd } from "@/lib/format";
 import { useGame, worldBurned } from "@/state/store";
@@ -88,6 +88,7 @@ export function LedgerTab() {
             <li>Die in the dark and your gold counts for nobody. The pool is then shared among the delvers who made it home.</li>
             <li>The lot buys floor Rare Friends once it can afford two. One is burned, the rest are drawn. Tickets come only from runs you extract from, so spending without playing wins nothing.</li>
             <li>The lock pool ({Math.round(LOCK_SHARE * 100)}%, part of the {Math.round(POOL_SHARE * 100)}% that goes back to players) is shared only among locked Delvers, Friends and staked RF, by passive gold. Descents never draw on it, and locks never draw on the round pool.</li>
+            <li>Expeditions (Ember Altar) use their own split: {Math.round(EXPEDITION_BURN * 100)}% burned, {Math.round(EXPEDITION_LOT * 100)}% to the Friend lot, {Math.round(EXPEDITION_POOL * 100)}% into the round pool. Their hauls are keys, tickets and gold, never RF.</li>
             <li>Crystals, weapons and Delvers are not redeemable for RF, so they need no reserve.</li>
           </ul>
         </CardContent>

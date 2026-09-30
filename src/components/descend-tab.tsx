@@ -37,7 +37,8 @@ export function DescendTab() {
   // What a perk is worth depends on whether the thing behind it is locked, and for how long.
   const lockOf = (key: string) => game.locks.find(l => l.key === key);
   const lockedTag = (v: HeroVisual, key: string): HeroVisual => (lockOf(key) ? { ...v, subtitle: `${v.subtitle} · locked` } : v);
-  const heroChoices: { choice: HeroChoice; visual: HeroVisual; key: string }[] = [
+  const awayIds = new Set(game.expeditions.map(e => e.heroId));
+  const heroChoices: { choice: HeroChoice; visual: HeroVisual; key: string; away?: boolean }[] = [
     { choice: { kind: "wanderer" }, visual: WANDERER, key: "wanderer" },
   ];
   if (friend.hasFriend && wallet.selected !== null) {
@@ -46,7 +47,9 @@ export function DescendTab() {
   }
   for (const h of game.heroes) {
     const key = heroLockKey(h.id);
-    heroChoices.push({ choice: { kind: "nft", id: h.id }, visual: lockedTag(nftVisual(h, strength(lockOf(key), game.round)), key), key: h.id });
+    const visual = lockedTag(nftVisual(h, strength(lockOf(key), game.round)), key);
+    const away = awayIds.has(h.id);
+    heroChoices.push({ choice: { kind: "nft", id: h.id }, visual: away ? { ...visual, subtitle: `${visual.subtitle} · away` } : visual, key: h.id, away });
   }
   for (const p of game.prizes) heroChoices.push({ choice: { kind: "prize", serial: p.serial }, visual: prizeVisual(p), key: `prize-${p.serial}` });
 
@@ -56,7 +59,8 @@ export function DescendTab() {
     if (c.kind === "prize" && game.hero.kind === "prize") return c.serial === game.hero.serial;
     return true;
   };
-  const selectedValid = heroChoices.some(h => isSelected(h.choice));
+  // A Delver that is on an expedition cannot descend, so it counts as not picked.
+  const selectedValid = heroChoices.some(h => !h.away && isSelected(h.choice));
   const friendPerkPending = selectedValid && game.hero.kind === "friend" && !wallet.sprite;
 
   const buyKeys = (count: number) => {
@@ -114,17 +118,20 @@ export function DescendTab() {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Character">
-            {heroChoices.map(({ choice, visual, key }) => {
+            {heroChoices.map(({ choice, visual, key, away }) => {
               const active = isSelected(choice) || (!selectedValid && choice.kind === "wanderer");
               return (
                 <button
                   key={key}
                   role="radio"
                   aria-checked={active}
+                  aria-disabled={away || undefined}
+                  disabled={away}
                   onClick={() => game.selectHero(choice)}
                   className={cn(
                     "group flex flex-col items-center gap-2 rounded-lg border bg-black/40 p-3 text-center transition-colors outline-none focus-visible:ring-2 focus-visible:ring-lime",
                     active ? "border-lime bg-lime/[0.07]" : "border-white/10 hover:border-white/30",
+                    away && "cursor-not-allowed opacity-40",
                   )}
                 >
                   {visual.portrait

@@ -100,3 +100,20 @@ The pool is fixed, so more lockers means a smaller cut for each. Yield falls as 
 ### Why hopping in and out does not pay
 
 A Legendary Delver farms about 10.42 RF in its first round. Breaking it before maturity forfeits half of that and burns 150 RF (10% of 1,500), roughly 14 times a round's yield. So a lock only makes sense if it is kept, and the burn feeds the same sink as everything else.
+
+
+## F. Expeditions
+
+A Delver can be sent away for 100 RF plus an optional pack (preview: 5 seconds; a live version would take hours to a day). The price is split 40% burned, 5% weekly Friend lot, 55% round pool. It comes back with a haul or with nothing.
+A haul is a multiplier between ×0.6 and ×15 of 1 key, 1 ticket and 120 gold; its rarity is drawn from Common 84%, Uncommon 12%, Rare 3%, Epic 0.7%, Legendary 0.1%. The average successful haul is ×1.16.
+Worth is in RF: a key 50, a ticket 20 (an assumption: what a ticket is worth depends on the whole week's draw), a gold 0.26 (what one gold is worth in the demo's round pool before the return cap). Hauls are never paid in RF.
+
+| Pack | Total cost | Burned | Friend lot | Round pool | Returns with a haul | Average haul | Average worth | Worth ÷ cost | ×2 or more | ×5 or more | ×10 or more |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| No pack | 100 RF | 40 | 5 | 55 | 45% | 0.52 keys, 0.52 tickets, 63 gold | 53.02 RF | 53% | 3.9% | 0.36% | 0.05% |
+| Scout Pack | 130 RF | 52 | 6.5 | 71.5 | 58% | 0.67 keys, 0.67 tickets, 81 gold | 68.33 RF | 53% | 5.0% | 0.46% | 0.06% |
+| Ranger Pack | 160 RF | 64 | 8 | 88 | 70% | 0.81 keys, 0.81 tickets, 98 gold | 82.47 RF | 52% | 6.0% | 0.56% | 0.07% |
+| Vanguard Pack | 190 RF | 76 | 9.5 | 104.5 | 82% | 0.95 keys, 0.95 tickets, 114 gold | 96.61 RF | 51% | 7.1% | 0.66% | 0.08% |
+
+Even with the best pack an average trip is worth less than it cost, so an expedition is a sink with a lottery ticket attached, not a faucet. Packs are priced so that the average worth stays at about half the cost at every tier: a pack buys a steadier trip (a higher chance of coming back with a haul), not a better deal.
+The keys and tickets are game items, not RF, but a key is worth what a player would otherwise pay to descend (50 RF), so the table counts them. Gold joins the round like gold from a descent and is subject to the return cap.

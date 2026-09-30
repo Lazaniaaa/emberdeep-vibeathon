@@ -14,6 +14,7 @@ import { rf, usd } from "@/lib/format";
 import { InsufficientFunds, SoldOut, useGame } from "@/state/store";
 import { nftVisual } from "./hero-info";
 import { HeroAvatar } from "./art";
+import { ExpeditionPanel } from "./expedition-panel";
 import { LockPanel } from "./lock-panel";
 
 export function AltarTab() {
@@ -35,6 +36,7 @@ export function AltarTab() {
       <TabsList>
         <TabsTrigger value="mint">Mint</TabsTrigger>
         <TabsTrigger value="lock">Lock</TabsTrigger>
+        <TabsTrigger value="expedition">Expedition</TabsTrigger>
       </TabsList>
       <TabsContent value="mint" className="space-y-4">
         <Card>
@@ -113,6 +115,9 @@ export function AltarTab() {
       </TabsContent>
       <TabsContent value="lock">
         <LockPanel />
+      </TabsContent>
+      <TabsContent value="expedition">
+        <ExpeditionPanel />
       </TabsContent>
     </Tabs>
   );

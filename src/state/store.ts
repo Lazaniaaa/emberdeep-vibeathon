@@ -1,17 +1,19 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import {
-  FAUCET_AMOUNT, FIELD_LOCK_GOLD, FLASK_PRICE, HOLD_FACTOR, KEY_PRICE, MAX_FLASKS, MAX_KEYS, PASSES, ROUND_SEED_GOLD,
-  MAX_ROUND_RETURN, ROUND_SEED_LOCKED, ROUND_SEED_POOL, START_BALANCE, START_KEYS, STAKE_MAX, WORLD_BURN_SEED, WORLD_MINT_SEED, type PassId,
+  EXPEDITION_COST, EXPEDITION_DURATION_MS, EXPEDITION_PACKS, FAUCET_AMOUNT, FIELD_LOCK_GOLD, FLASK_PRICE, HOLD_FACTOR, KEY_PRICE,
+  EXPEDITION_TIERS, MAX_FLASKS, MAX_KEYS, PASSES, ROUND_SEED_GOLD, MAX_ROUND_RETURN, ROUND_SEED_LOCKED, ROUND_SEED_POOL, START_BALANCE, START_KEYS,
+  STAKE_MAX, WORLD_BURN_SEED, WORLD_MINT_SEED, type PackId, type PassId,
 } from "@/game/config";
 import {
   ARMORS, CLASSES, FAMILY_PERKS, FRIEND_BLESSING, POTIONS, POTION_IDS, RARITIES, RARITY_INFO, WEAPONS, heroPerks,
   mergePerks, scalePerks, type ArmorId, type HeroNft, type Perks, type PotionId, type Rarity, type WeaponId,
 } from "@/game/catalog";
 import {
-  applyBurn, applyClaim, applySpend, mintHero, mintsLeft, rollSigilRarity, settleRound, splitSpend, type Ledger, type LedgerEntry,
-  type RoundSettlement,
+  applyBurn, applyClaim, applySpend, mintHero, mintsLeft, rollSigilRarity, settleRound, splitExpeditionSpend, splitSpend, type Ledger,
+  type LedgerEntry, type RoundSettlement,
 } from "@/game/economy";
+import { hasReturned, rollExpedition, secondsLeft, type Outcome } from "@/game/expedition";
 import {
   FRIEND_LOCK_KEY, FRIEND_LOCK_VALUE, STAKE_LOCK_KEY, addToStake, exitTerms, heroLockKey, heroLockValue, isMature, settleLocks,
   stakeGoldPct, strength, type Lock,
@@ -23,6 +25,12 @@ import { emptyBag, type PotionBag, type RunState } from "@/game/run";
 export type HeroChoice = { kind: "wanderer" } | { kind: "nft"; id: string } | { kind: "friend" } | { kind: "prize"; serial: number };
 
 export type PrizeFriend = LotFriend & { wonAt: number };
+
+/** A Delver away on an expedition. The trip was decided when it left; `outcome` stays sealed until it is collected. */
+export type Expedition = { id: string; heroId: string; pack: PackId; sentAt: number; returnsAt: number; outcome: Outcome };
+
+/** A trip that has come home, for the list of recent returns. */
+export type ExpeditionReturn = { at: number; heroName: string; pack: PackId; outcome: Outcome; keysLost: number };
 
 export type RunReport = {
   outcome: "extracted" | "dead";
@@ -43,7 +51,7 @@ export type RunReport = {
 };
 
 type Stats = {
-  runs: number; extracts: number; deaths: number; deepest: number; bestPayout: number; mints: number; bosses: number;
+  runs: number; extracts: number; deaths: number; deepest: number; bestPayout: number; mints: number; bosses: number; expeditions: number;
 };
 
 type State = Ledger & {
@@ -92,6 +100,10 @@ type State = Ledger & {
   locks: Lock[];
   /** Passive gold the simulated crowd's lockers farm this round. */
   fieldLockGold: number;
+  /** Delvers away on expeditions. A Delver is away until you collect its haul. */
+  expeditions: Expedition[];
+  /** The last few trips that came home, newest first. */
+  returns: ExpeditionReturn[];
 };
 
 type Actions = {
@@ -119,6 +131,10 @@ type Actions = {
   unlock: (key: string) => UnlockResult;
   /** Moves a mature lock's farmed RF into your balance and keeps the lock. */
   harvest: (key: string) => number;
+  /** Sends a Delver away. It costs EXPEDITION_COST plus the pack, and the trip is decided now. `now` is for tests. */
+  sendExpedition: (heroId: string, pack: PackId, now?: number) => Expedition;
+  /** Brings a Delver home once its time is up and hands over the haul. `now` is for tests. */
+  collectExpedition: (id: string, now?: number) => ExpeditionReturn;
   /** Settles a paid run whose progress was lost (the tab was closed mid-descent) as a run lost in the dark. */
   abandonRun: () => boolean;
   faucet: () => void;
@@ -157,7 +173,7 @@ const initial = (): State => ({
   hero: { kind: "wanderer" },
   flasks: 2,
   log: [],
-  stats: { runs: 0, extracts: 0, deaths: 0, deepest: 0, bestPayout: 0, mints: 0, bosses: 0 },
+  stats: { runs: 0, extracts: 0, deaths: 0, deepest: 0, bestPayout: 0, mints: 0, bosses: 0, expeditions: 0 },
   muted: false,
   reducedMotion: typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches,
   lastReport: null,
@@ -175,6 +191,8 @@ const initial = (): State => ({
   passWeek: 0,
   locks: [],
   fieldLockGold: FIELD_LOCK_GOLD,
+  expeditions: [],
+  returns: [],
 });
 
 const record = (value: unknown): Record<string, unknown> =>
@@ -224,6 +242,15 @@ export function mergeSavedState(persisted: unknown, current: State & Actions): S
       return l.kind !== "hero" || heroes.some(h => heroLockKey(h.id) === l.key);
     })
     : defaults.locks;
+  // A Delver can only be away once, and only if you still own it.
+  const away = new Set<string>();
+  const expeditions = Array.isArray(saved.expeditions)
+    ? saved.expeditions.filter(isExpedition).filter(e => {
+      if (away.has(e.heroId) || !heroes.some(h => h.id === e.heroId)) return false;
+      away.add(e.heroId);
+      return true;
+    })
+    : defaults.expeditions;
   const hero = record(saved.hero);
   const safeHero: HeroChoice = hero.kind === "nft" && typeof hero.id === "string"
     ? { kind: "nft", id: hero.id }
@@ -268,7 +295,37 @@ export function mergeSavedState(persisted: unknown, current: State & Actions): S
     passWeek: amount(saved.passWeek, defaults.passWeek, true),
     locks,
     fieldLockGold: amount(saved.fieldLockGold, defaults.fieldLockGold),
+    expeditions,
+    returns: Array.isArray(saved.returns) ? saved.returns.filter(isExpeditionReturn).slice(0, 5) : defaults.returns,
   };
+}
+
+function isOutcome(value: unknown): value is Outcome {
+  const o = record(value);
+  const loot = record(o.loot);
+  const count = (n: unknown, max: number) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0 && n <= max;
+  return typeof o.success === "boolean"
+    && (o.tier === null || (typeof o.tier === "string" && EXPEDITION_TIERS.some(t => t.id === o.tier)))
+    && typeof o.multiplier === "number" && Number.isFinite(o.multiplier) && o.multiplier >= 0 && o.multiplier <= 15
+    && count(loot.keys, 20) && count(loot.tickets, 20) && count(loot.gold, 2_000);
+}
+
+function isExpedition(value: unknown): value is Expedition {
+  const e = record(value);
+  return typeof e.id === "string" && e.id.length > 0 && e.id.length < 80
+    && typeof e.heroId === "string" && e.heroId.length > 0 && e.heroId.length < 80
+    && typeof e.pack === "string" && Object.hasOwn(EXPEDITION_PACKS, e.pack)
+    && typeof e.sentAt === "number" && Number.isFinite(e.sentAt) && e.sentAt >= 0
+    && typeof e.returnsAt === "number" && Number.isFinite(e.returnsAt) && e.returnsAt >= e.sentAt
+    && isOutcome(e.outcome);
+}
+
+function isExpeditionReturn(value: unknown): value is ExpeditionReturn {
+  const r = record(value);
+  return typeof r.at === "number" && Number.isFinite(r.at) && typeof r.heroName === "string" && r.heroName.length < 80
+    && typeof r.pack === "string" && Object.hasOwn(EXPEDITION_PACKS, r.pack)
+    && typeof r.keysLost === "number" && Number.isSafeInteger(r.keysLost) && r.keysLost >= 0
+    && isOutcome(r.outcome);
 }
 
 function isLock(value: unknown): value is Lock {
@@ -335,6 +392,8 @@ export class SoldOut extends Error {}
 
 /** A lock action that cannot be done, with a reason the player can read. */
 export class LockError extends Error {}
+/** An expedition that cannot be sent or collected, with a reason the player can read. */
+export class ExpeditionError extends Error {}
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -371,6 +430,8 @@ export function migrateSavedState(persisted: unknown, version: number) {
   if (version < 5) Object.assign(saved, { locks: [], locked: ROUND_SEED_LOCKED, fieldLockGold: FIELD_LOCK_GOLD });
   // v6 caps what a round pays at a multiple of what went into its descents. A round already in progress does not
   // know that figure, so assume the gold cost about its worth rather than zero out its payout.
+  // v7 added expeditions.
+  if (version < 7) Object.assign(saved, { expeditions: [], returns: [] });
   if (version < 6) Object.assign(saved, { roundSpent: typeof saved.roundGold === "number" && saved.roundGold > 0 ? saved.roundGold : 0 });
   return saved;
 }
@@ -513,6 +574,7 @@ export const useGame = create<State & Actions>()(
             bestPayout: s.stats.bestPayout,
             mints,
             bosses: s.stats.bosses + (run.bossSlain ? 1 : 0),
+            expeditions: s.stats.expeditions,
           },
         });
         return report;
@@ -647,6 +709,59 @@ export const useGame = create<State & Actions>()(
         return amount;
       },
 
+      sendExpedition: (heroId, pack, now = Date.now()) => {
+        const s = get();
+        if (!s.heroes.some(h => h.id === heroId)) throw new ExpeditionError("That Delver is not in your collection");
+        if (s.expeditions.some(e => e.heroId === heroId)) throw new ExpeditionError("That Delver is already away");
+        if (s.runSpent > 0 && s.hero.kind === "nft" && s.hero.id === heroId) throw new ExpeditionError("Finish the descent first: that Delver is in the cave");
+        const cost = EXPEDITION_COST + EXPEDITION_PACKS[pack].price;
+        if (cost > s.rf + 1e-9) throw new InsufficientFunds(`Not enough RF: this expedition costs ${cost} RF`);
+        const split = splitExpeditionSpend(cost);
+        const trip: Expedition = {
+          id: newRunId(), heroId, pack, sentAt: now, returnsAt: now + EXPEDITION_DURATION_MS, outcome: rollExpedition(randomSeed(), pack),
+        };
+        const entry: LedgerEntry = {
+          at: Date.now(), kind: "spend", label: `Expedition (${EXPEDITION_PACKS[pack].name})`, amount: cost,
+          burned: split.burned, pooled: split.pooled, raffle: split.raffle, locked: 0,
+        };
+        set({
+          ...applySpend(s, cost, split),
+          expeditions: [...s.expeditions, trip],
+          // A Delver that is away cannot be the one that descends.
+          hero: s.hero.kind === "nft" && s.hero.id === heroId ? { kind: "wanderer" } : s.hero,
+          log: [entry, ...s.log].slice(0, 60),
+        });
+        return trip;
+      },
+
+      collectExpedition: (id, now = Date.now()) => {
+        const s = get();
+        const trip = s.expeditions.find(e => e.id === id);
+        if (!trip) throw new ExpeditionError("That expedition is not out");
+        if (!hasReturned(trip.returnsAt, now)) throw new ExpeditionError(`Still away: back in ${secondsLeft(trip.returnsAt, now)} s`);
+        const { loot } = trip.outcome;
+        const keys = Math.min(MAX_KEYS, s.keys + loot.keys);
+        const delver = s.heroes.find(h => h.id === trip.heroId);
+        const back: ExpeditionReturn = {
+          at: now, heroName: delver ? `${CLASSES[delver.classId].name} #${delver.serial}` : "A Delver", pack: trip.pack,
+          outcome: trip.outcome, keysLost: s.keys + loot.keys - keys,
+        };
+        const said = trip.outcome.success
+          ? `came back with ${loot.keys} key${loot.keys === 1 ? "" : "s"}, ${loot.tickets} ticket${loot.tickets === 1 ? "" : "s"}, ${loot.gold} gold`
+          : "came back empty-handed";
+        set({
+          keys,
+          tickets: s.tickets + loot.tickets,
+          // Gold from a trip joins the round like gold from a descent, so it shares the pool (and the return cap).
+          roundGold: s.roundGold + loot.gold,
+          expeditions: s.expeditions.filter(e => e.id !== id),
+          returns: [back, ...s.returns].slice(0, 5),
+          stats: { ...s.stats, expeditions: s.stats.expeditions + 1 },
+          log: [note("payout", `Expedition: ${back.heroName} ${said}`, 0), ...s.log].slice(0, 60),
+        });
+        return back;
+      },
+
       faucet: () => {
         const s = get();
         set({
@@ -712,7 +827,7 @@ export const useGame = create<State & Actions>()(
     }),
     {
       name: "emberdeep-save-v1",
-      version: 6,
+      version: 7,
       merge: mergeSavedState,
       migrate: migrateSavedState,
     },

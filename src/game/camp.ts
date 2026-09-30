@@ -18,7 +18,7 @@ export type Station = {
 
 export const STATIONS: readonly Station[] = [
   { id: "gate", x: 20, y: 5, name: "Dungeon Gate", blurb: "Pick who descends, buy oil and an entry key, then light the lantern." },
-  { id: "altar", x: 9, y: 9, name: "Ember Altar", blurb: "Burn RF to mint a Delver with a class perk." },
+  { id: "altar", x: 9, y: 9, name: "Ember Altar", blurb: "Mint Delvers, lock them for stronger perks, or send them on expeditions." },
   { id: "armory", x: 31, y: 9, name: "Armory", blurb: "Weapons, potions and crafting with crystals." },
   { id: "board", x: 9, y: 19, name: "Friend Board", blurb: "The weekly Friend lot, your tickets and the passes." },
   { id: "ledger", x: 31, y: 19, name: "Vault", blurb: "The reward round, where every RF goes, and your session." },

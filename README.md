@@ -48,6 +48,8 @@ Other delvers wander the camp with name tags and chatter, and Old Ember by the g
 8. **Lock (optional).** Perks you only hold work at 60% strength. Lock a Delver, your Rare Friend or some
    RF at the Ember Altar and the perk grows with every round closed, and the lock farms a share of the
    lock pool. See [Locks](#locks).
+9. **Expedition (optional).** Send a Delver away for about $1 (100 RF) plus an optional pack. It comes back with a
+   random haul of keys, tickets and gold, or with nothing. See [Expeditions](#expeditions).
 
 Dimlings wander the deep and drink your light when they're next to you. Bump into one to
 attack it; your weapon decides how many swings it takes.
@@ -181,6 +183,24 @@ and both are funded by spend, not by new tokens. In the demo's crowd a lock farm
 per round, and the cut falls as more lockers join (see the sensitivity tables in the economy report). The
 crowd's 16,000 passive gold a round is an assumption, like its gold per RF.
 
+### Expeditions
+
+Instead of going down the cave, a Delver can be sent into unmapped land (Ember Altar, Expedition tab). It is
+never lost: it either comes back with a haul or empty-handed. While it is away it cannot descend.
+
+| Rule | Value |
+| --- | --- |
+| Cost | **100 RF** (about $1), plus an optional pack |
+| Split of the price | **40% burned, 5% to the weekly Friend lot, 55% to the round pool** |
+| Away for | **5 seconds in the preview** (a live version would be a few hours up to a day); the trip is decided when the Delver leaves, so reloading cannot re-roll it |
+| Chance to come back with a haul | No pack 45%, Scout Pack (+30 RF) 58%, Ranger Pack (+60 RF) 70%, Vanguard Pack (+90 RF) 82% |
+| The haul | ×0.6 to ×15 of a basic haul (1 key, 1 ticket, 120 gold); 84% Common (×0.6–1.2), 12% Uncommon, 3.2% Rare, 0.7% Epic, 0.1% Legendary (×10–15) |
+
+Hauls are never RF. Keys and tickets go to your stock (up to 30 keys), and gold joins the round like gold from a
+descent, so the 160% return cap applies to it. Trip spend does not count toward that cap. The average haul is worth
+about half of what the trip costs at every pack tier, so an expedition is a sink with a lottery ticket attached
+(numbers in [docs/economy-report.md](docs/economy-report.md), section F). Packs buy a steadier trip, not a better deal.
+
 ### Weapons, armor and potions
 
 Every item has its own picture in the Armory, the gate and the potion bar.
@@ -282,6 +302,8 @@ The game is rendered on a canvas. The camp, items, portraits and monsters are pi
 
 - Keys, oil, potions, weapons and mints would become RF transfers split by a contract: 25% burned, 8% to the Friend lot, 60% to a
   reward-pool vault and 7% to a lock-pool vault.
+- Expeditions would run on block timestamps with verifiable randomness for the roll; the trip is currently decided
+  in the browser when the Delver leaves and stored, which a tampered client could edit.
 - Locks would escrow the NFT or RF in a staking contract and age by scheduled rounds. Farmed RF is paid out of the
   lock-pool vault when a lock matures or is released; an early exit sends the forfeited half back to that vault and
   the fee to the burn address.

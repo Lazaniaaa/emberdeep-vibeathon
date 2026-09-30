@@ -34,7 +34,7 @@ export const MAX_FLASKS = 5;
 export const KEY_PRICE = 50;
 /** New saves start with a few keys so a first-time player can descend immediately. */
 export const START_KEYS = 3;
-export const MAX_KEYS = 20;
+export const MAX_KEYS = 30;
 
 // Rewards are a share of the round's pool, never a fixed rate per gold. The pool is 60% of every RF
 // spent in the round (ACTIVE_SHARE; another 7% feeds the lock pool). Gold is only earned by extracting
@@ -148,6 +148,44 @@ export const STAKE_GOLD_CAP = 8;
 /** NFT locks (Delvers and the wallet Friend) earn this fraction of a raffle ticket per round, for the first few locks only. */
 export const LOCK_TICKET_DUST = 0.25;
 export const LOCK_TICKET_LOCKS = 2;
+
+// ---------------------------------------------------------------- expeditions
+// A Delver can be sent into unmapped land instead of down the cave. It may come back with a haul, or with
+// nothing (it is never lost). The roll is made when it leaves, so reloading the page cannot re-roll it.
+
+/** What one expedition costs, before any pack. About $1. */
+export const EXPEDITION_COST = 100;
+/** Expedition spend has its own split: more is burned than for ordinary spend, and no lock pool takes a cut. */
+export const EXPEDITION_BURN = 0.4;
+export const EXPEDITION_LOT = 0.05;
+export const EXPEDITION_POOL = 0.55;
+/**
+ * How long a Delver is away. 5 seconds is a test preview so a whole trip can be seen at once; a live
+ * version would send it away for a few hours up to a day (the timestamps already work that way).
+ */
+export const EXPEDITION_DURATION_MS = 5_000;
+/** What an average haul (a multiplier of 1) holds. The multiplier scales all three. */
+export const EXPEDITION_BASE_LOOT = { keys: 1, tickets: 1, gold: 120 } as const;
+export type ExpeditionTierId = "common" | "uncommon" | "rare" | "epic" | "legendary";
+/** Haul size by rarity: the weight is in basis points of successful trips, the range is the multiplier. */
+export const EXPEDITION_TIERS: readonly { id: ExpeditionTierId; label: string; weight: number; min: number; max: number }[] = [
+  { id: "common", label: "Common", weight: 8_400, min: 0.6, max: 1.2 },
+  { id: "uncommon", label: "Uncommon", weight: 1_200, min: 1.2, max: 2.5 },
+  { id: "rare", label: "Rare", weight: 320, min: 2.5, max: 5 },
+  { id: "epic", label: "Epic", weight: 70, min: 5, max: 10 },
+  { id: "legendary", label: "Legendary", weight: 10, min: 10, max: 15 },
+];
+export type PackId = "none" | "scout" | "ranger" | "vanguard";
+/**
+ * Gear for one trip: it costs RF and raises the chance of coming back with a haul. Prices are set so the average haul
+ * stays worth about half of what the trip costs at every tier: a pack buys a steadier trip, not a better deal.
+ */
+export const EXPEDITION_PACKS: Record<PackId, { id: PackId; name: string; price: number; chance: number; blurb: string }> = {
+  none: { id: "none", name: "No pack", price: 0, chance: 0.45, blurb: "Bare hands and a prayer." },
+  scout: { id: "scout", name: "Scout Pack", price: 30, chance: 0.58, blurb: "Rope, torch and a map scrap." },
+  ranger: { id: "ranger", name: "Ranger Pack", price: 60, chance: 0.7, blurb: "Leather, a lantern and rations." },
+  vanguard: { id: "vanguard", name: "Vanguard Pack", price: 90, chance: 0.82, blurb: "Plate, flares and a guide." },
+};
 
 /** Chance that a Sealed Vault holds a Soul Sigil (a free character mint). */
 export const SIGIL_DROP_CHANCE = 0.3;

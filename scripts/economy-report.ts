@@ -5,8 +5,11 @@ import { fileURLToPath } from "node:url";
 import { it } from "vitest";
 import {
   ACTIVE_SHARE, FIELD_GOLD_PER_RF, FIELD_LOCK_GOLD, FLASK_PRICE, HOLD_FACTOR, KEY_PRICE, LOCK_MAX, LOCK_SHARE, LOCK_START,
-  MATURITY_ROUNDS, MAX_ROUND_RETURN, POOL_SHARE, ROUND_SEED_LOCKED, STAKE_MAX,
+  MATURITY_ROUNDS, MAX_ROUND_RETURN, POOL_SHARE, ROUND_SEED_GOLD, ROUND_SEED_LOCKED, ROUND_SEED_POOL, STAKE_MAX,
+  EXPEDITION_BASE_LOOT, EXPEDITION_BURN, EXPEDITION_COST, EXPEDITION_DURATION_MS, EXPEDITION_LOT, EXPEDITION_PACKS, EXPEDITION_POOL,
+  EXPEDITION_TIERS, type PackId,
 } from "../src/game/config";
+import { chanceAtLeast, expectedLoot, meanMultiplier } from "../src/game/expedition";
 import { FAMILY_PERKS, FRIEND_BLESSING, NO_PERKS, RARITY_INFO, heroPerks, mergePerks, scalePerks, type HeroNft } from "../src/game/catalog";
 import { settleRound } from "../src/game/economy";
 import { FRIEND_LOCK_VALUE, STAKE_LOCK_KEY, lockFactor, settleLocks, stakeGoldPct, type Lock } from "../src/game/locks";
@@ -158,6 +161,32 @@ it("writes the economy report", { timeout: 900_000 }, () => {
   out.push("", "### Why hopping in and out does not pay", "");
   out.push(
     `A Legendary Delver farms about ${usdRf(oneRound)} RF in its first round. Breaking it before maturity forfeits half of that and burns ${usdRf(leg.value * 0.1)} RF (10% of ${leg.value.toLocaleString("en-US")}), roughly ${Math.round(leg.value * 0.1 / oneRound)} times a round's yield. So a lock only makes sense if it is kept, and the burn feeds the same sink as everything else.`,
+    "",
+  );
+
+  // F. Expeditions: a Delver sent away for a random haul.
+  const TICKET_RF = 20;
+  const GOLD_RF = ROUND_SEED_POOL / ROUND_SEED_GOLD;
+  const packs = Object.keys(EXPEDITION_PACKS) as PackId[];
+  out.push("", "## F. Expeditions", "");
+  out.push(
+    `A Delver can be sent away for ${EXPEDITION_COST} RF plus an optional pack (preview: ${EXPEDITION_DURATION_MS / 1000} seconds; a live version would take hours to a day). The price is split ${pct(EXPEDITION_BURN)} burned, ${pct(EXPEDITION_LOT)} weekly Friend lot, ${pct(EXPEDITION_POOL)} round pool. It comes back with a haul or with nothing.`,
+    `A haul is a multiplier between ×${EXPEDITION_TIERS[0].min} and ×${EXPEDITION_TIERS[EXPEDITION_TIERS.length - 1].max} of ${EXPEDITION_BASE_LOOT.keys} key, ${EXPEDITION_BASE_LOOT.tickets} ticket and ${EXPEDITION_BASE_LOOT.gold} gold; its rarity is drawn from ${EXPEDITION_TIERS.map(t => `${t.label} ${(t.weight / 100).toFixed(t.weight < 100 ? 1 : 0)}%`).join(", ")}. The average successful haul is ×${meanMultiplier().toFixed(2)}.`,
+    `Worth is in RF: a key ${KEY_PRICE}, a ticket ${TICKET_RF} (an assumption: what a ticket is worth depends on the whole week's draw), a gold ${GOLD_RF.toFixed(2)} (what one gold is worth in the demo's round pool before the return cap). Hauls are never paid in RF.`,
+    "",
+  );
+  out.push("| Pack | Total cost | Burned | Friend lot | Round pool | Returns with a haul | Average haul | Average worth | Worth ÷ cost | ×2 or more | ×5 or more | ×10 or more |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+  for (const id of packs) {
+    const pack = EXPEDITION_PACKS[id];
+    const cost = EXPEDITION_COST + pack.price;
+    const l = expectedLoot(id);
+    const worth = l.keys * KEY_PRICE + l.tickets * TICKET_RF + l.gold * GOLD_RF;
+    out.push(`| ${pack.name} | ${cost} RF | ${usdRf(cost * EXPEDITION_BURN)} | ${usdRf(cost * EXPEDITION_LOT)} | ${usdRf(cost * EXPEDITION_POOL)} | ${pct(pack.chance)} | ${l.keys.toFixed(2)} keys, ${l.tickets.toFixed(2)} tickets, ${Math.round(l.gold)} gold | ${usdRf(worth)} RF | ${pct(worth / cost)} | ${(chanceAtLeast(id, 2) * 100).toFixed(1)}% | ${(chanceAtLeast(id, 5) * 100).toFixed(2)}% | ${(chanceAtLeast(id, 10) * 100).toFixed(2)}% |`);
+  }
+  out.push(
+    "",
+    "Even with the best pack an average trip is worth less than it cost, so an expedition is a sink with a lottery ticket attached, not a faucet. Packs are priced so that the average worth stays at about half the cost at every tier: a pack buys a steadier trip (a higher chance of coming back with a haul), not a better deal.",
+    "The keys and tickets are game items, not RF, but a key is worth what a player would otherwise pay to descend (50 RF), so the table counts them. Gold joins the round like gold from a descent and is subject to the return cap.",
     "",
   );
 
