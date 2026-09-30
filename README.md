@@ -276,7 +276,6 @@ npm run typecheck
 npm run lint
 npm run build      # static site in dist/ (relative paths, host anywhere)
 node scripts/optimize-maps.mjs  # rebuild public/maps/*.webp from the originals in art-src/maps
-node scripts/optimize-enemies.mjs  # rebuild public/enemies/*.webp from the originals in art-src/enemies
 npm run economy    # regenerate docs/economy-report.md (about a minute, deterministic)
 npm run smoke      # headless browser pass; needs `npx playwright install chromium` and a running dev server
 ```
@@ -304,7 +303,7 @@ The build in `dist/` is a plain static site. `deploy/README.md` walks through ho
 ## Stack
 
 Vite, React 19, TypeScript, Tailwind CSS v4, shadcn/ui (Base UI), zustand, viem and Vitest.
-The game is rendered on a canvas. The camp, items and portraits are pixel art drawn in code; the seven dungeon floors and the nine creatures use painted WebP art.
+The game is rendered on a canvas. The camp, items, portraits and the nine creatures are pixel art drawn in code; the seven dungeon floors use painted WebP art.
 
 ## Integration notes for an on-chain phase
 

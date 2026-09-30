@@ -4,8 +4,8 @@ import { DEFAULT_SPECIES } from "@/game/enemies";
 import { ART_DOORWAYS } from "@/game/map-art";
 import { currentRadius, type RunState } from "@/game/run";
 import { CreatureAnimator, restPose, type Pose } from "./creature-anim";
-import { enemyImage } from "./enemy-art";
-import { DIMLING, ICONS, drawMask, type Mask } from "./sprites";
+import { mobCanvas } from "./mob-art";
+import { ICONS, drawMask, type Mask } from "./sprites";
 
 export const TILE = 32;
 
@@ -216,58 +216,49 @@ function drawCerberus(ctx: CanvasRenderingContext2D, d: Dimling, time: number, s
 
 const animator = new CreatureAnimator();
 
+/** A creature is a 16 x 16 pixel sprite drawn at twice its size, like the delver, so it stands on one tile. */
+const MOB_SCALE = 2;
+
 /**
- * A creature: its picture on the tile, moved by its pose (glide, hop, turn), a health bar, and a bar that shows its attack.
- * The attack bar is empty while it is idle, fills red as it winds up, and shows blue while it recovers and cannot strike.
+ * A creature: its sprite on the tile in the frame of its pose (walk, wind-up), a health bar, and a bar that shows its
+ * attack. The attack bar is empty while it is idle, fills red as it winds up, and shows blue while it recovers.
  */
 function drawCreature(ctx: CanvasRenderingContext2D, d: Dimling, pose: Pose, time: number, still: boolean) {
-  const image = enemyImage(d.species ?? DEFAULT_SPECIES);
-  const size = TILE * 1.6;
-  const tileX = pose.x * TILE, tileY = pose.y * TILE;
-  const cx = tileX + TILE / 2 + pose.offX;
-  const foot = tileY + TILE - 1 + pose.offY;
+  const species = d.species ?? DEFAULT_SPECIES;
   const phase = d.phase ?? "idle";
+  const tileX = pose.x * TILE, tileY = pose.y * TILE;
+  const left = Math.round(tileX + pose.offX), top = Math.round(tileY - pose.lift + pose.offY);
+  const cx = left + TILE / 2;
 
-  // The shadow stays on the floor and shrinks as the picture leaves it.
+  // The shadow stays on the floor and shrinks as the sprite leaves it.
   ctx.fillStyle = "rgba(0,0,0,0.4)";
   ctx.beginPath();
-  ctx.ellipse(cx, foot - 1, size * 0.3 * (1 - Math.min(0.4, pose.lift / 36)), 4, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx, Math.round(tileY) + TILE - 3, TILE * 0.36 * (1 - Math.min(0.3, pose.lift / 24)), 3, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  if (image) {
-    ctx.save();
-    if (!d.awake) ctx.globalAlpha = 0.72;
-    else if (phase === "recovery") ctx.globalAlpha = 0.6;
-    // The pictures are large pixel art: smoothing keeps their detail when they are drawn small.
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    // It turns on its feet, which sit a little below the middle of the picture.
-    ctx.translate(cx, foot - pose.lift - size * 0.4);
-    ctx.rotate(pose.rot);
-    ctx.scale(pose.sx, pose.sy);
-    ctx.drawImage(image, -size / 2, -size * 0.5, size, size);
-    ctx.restore();
-    ctx.imageSmoothingEnabled = false;
-  } else {
-    drawMask(ctx, DIMLING[still ? 0 : Math.floor(time / 220 + d.id) % 2], tileX, tileY, 2, d.awake ? COLORS.dimling : "#6f6f80", false, "#000");
-  }
+  ctx.save();
+  if (!d.awake) ctx.globalAlpha = 0.72;
+  else if (phase === "recovery") ctx.globalAlpha = 0.6;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(mobCanvas(species, pose.frame, pose.flip), left, top, 16 * MOB_SCALE, 16 * MOB_SCALE);
+  ctx.restore();
 
   if (!d.awake) {
     ctx.font = "8px Silkscreen, monospace";
     ctx.textAlign = "center";
     ctx.fillStyle = "#9aa0c8";
-    ctx.fillText("z", cx + 10, foot - size * 0.75 - pose.lift + (still ? 0 : Math.round(Math.sin(time / 500 + d.id) * 2)));
+    ctx.fillText("z", cx + 8, top + 4 + (still ? 0 : Math.round(Math.sin(time / 500 + d.id) * 2)));
   }
   if (phase === "windup") {
     ctx.font = "14px Silkscreen, monospace";
     ctx.textAlign = "center";
-    const y = foot - size * 0.98 - pose.lift;
+    const y = top - 1;
     ctx.fillStyle = "#000"; ctx.fillText("!", cx + 1, y + 1);
     ctx.fillStyle = "#ff4a2a"; ctx.fillText("!", cx, y);
   }
 
   const w = 28;
-  const barX = tileX + TILE / 2 - w / 2, by = tileY + TILE + 1;
+  const barX = Math.round(tileX) + TILE / 2 - w / 2, by = Math.round(tileY) + TILE + 1;
   ctx.fillStyle = "#000"; ctx.fillRect(barX - 1, by - 1, w + 2, 5);
   ctx.fillStyle = "#333"; ctx.fillRect(barX, by, w, 3);
   ctx.fillStyle = COLORS.sigil; ctx.fillRect(barX, by, Math.max(1, Math.round(w * d.hp / d.maxHp)), 3);

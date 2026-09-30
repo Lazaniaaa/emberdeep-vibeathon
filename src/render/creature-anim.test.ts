@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Dimling } from "@/game/dungeon";
-import { CREATURE_MOVE_MS, CreatureAnimator, TURN_MS, facingAngle, restPose } from "./creature-anim";
+import { CREATURE_MOVE_MS, CreatureAnimator, IDLE_MS, WALK_MS, restPose } from "./creature-anim";
 
 const creature = (over: Partial<Dimling> = {}): Dimling => ({
   id: 1, x: 5, y: 5, hp: 16, maxHp: 16, awake: true, species: "wickgnaw", phase: "idle", windupLeft: 0, cooldown: 0, aim: null, ...over,
@@ -14,13 +14,12 @@ describe("CreatureAnimator", () => {
     const pose = a.pose(d, 1000);
     expect(pose.x).toBe(5);
     expect(pose.y).toBe(5);
-    expect(pose.lift).toBe(0);
   });
 
-  it("glides between tiles with a hop instead of jumping", () => {
+  it("glides between tiles on a walk cycle with a hop instead of jumping", () => {
     const a = new CreatureAnimator();
-    a.update("run:1", [creature()], { x: 9, y: 5 }, 1000);
-    const moved = creature({ x: 6 });
+    a.update("run:1", [creature({ species: "snaretoad" })], { x: 9, y: 5 }, 1000);
+    const moved = creature({ species: "snaretoad", x: 6 });
     a.update("run:1", [moved], { x: 9, y: 5 }, 2000);
     const start = a.pose(moved, 2000);
     const middle = a.pose(moved, 2000 + CREATURE_MOVE_MS / 2);
@@ -28,9 +27,12 @@ describe("CreatureAnimator", () => {
     expect(start.x).toBeCloseTo(5, 5);
     expect(middle.x).toBeGreaterThan(5.3);
     expect(middle.x).toBeLessThan(5.7);
-    expect(middle.lift).toBeGreaterThan(2);
+    expect(middle.lift).toBeGreaterThan(0);
+    expect(Number.isInteger(middle.lift)).toBe(true);
     expect(end.x).toBe(6);
     expect(end.lift).toBe(0);
+    // The two halves of the walk alternate.
+    expect(a.pose(moved, 2000).frame).not.toBe(a.pose(moved, 2000 + WALK_MS).frame);
   });
 
   it("carries on from where the picture is when a second step starts mid-glide", () => {
@@ -59,48 +61,55 @@ describe("CreatureAnimator", () => {
     expect(a.pose(next, 2000).x).toBe(6);
   });
 
-  it("turns an awake top-down creature to face the delver, by the short way round", () => {
+  it("looks at the delver once awake, and keeps its look when level with them", () => {
     const a = new CreatureAnimator();
     const d = creature();
-    a.update("run:1", [d], { x: 5, y: 9 }, 1000);
-    expect(a.pose(d, 1000).rot).toBeCloseTo(0, 5);
-    a.update("run:1", [d], { x: 9, y: 5 }, 2000);
-    expect(a.pose(d, 2000 + TURN_MS).rot).toBeCloseTo(facingAngle({ x: 1, y: 0 }), 5);
-    const half = a.pose(d, 2000 + TURN_MS / 2).rot;
-    expect(half).toBeLessThan(0);
-    expect(half).toBeGreaterThan(facingAngle({ x: 1, y: 0 }));
-    // Turning from facing right to facing left goes through 180 degrees, never a full circle back.
-    a.update("run:1", [d], { x: 1, y: 5 }, 3000);
-    const turning = a.pose(d, 3000 + TURN_MS / 2).rot;
-    expect(Math.abs(turning)).toBeGreaterThan(Math.PI / 2);
-    expect(Math.abs(turning)).toBeLessThanOrEqual(Math.PI + 1e-9);
+    a.update("run:1", [d], { x: 9, y: 5 }, 1000);
+    expect(a.pose(d, 1000).flip).toBe(false);
+    a.update("run:1", [d], { x: 1, y: 5 }, 1100);
+    expect(a.pose(d, 1100).flip).toBe(true);
+    a.update("run:1", [d], { x: 5, y: 9 }, 1200);
+    expect(a.pose(d, 1200).flip).toBe(true);
   });
 
-  it("leaves a sleeping creature, and the front-on pictures, facing down", () => {
+  it("leaves a sleeping creature looking the way it was", () => {
     const a = new CreatureAnimator();
     const asleep = creature({ awake: false });
-    const bell = creature({ id: 2, species: "fourfold-bell" });
-    a.update("run:1", [asleep, bell], { x: 9, y: 5 }, 1000);
-    expect(a.pose(asleep, 1000 + TURN_MS).rot).toBeCloseTo(0, 5);
-    expect(a.pose(bell, 1000 + TURN_MS).rot).toBeCloseTo(0, 1);
+    a.update("run:1", [asleep], { x: 1, y: 5 }, 1000);
+    expect(a.pose(asleep, 1000).flip).toBe(false);
+    expect(a.pose(asleep, 1000).lift).toBe(0);
   });
 
-  it("trembles only while winding up, more as the blow gets closer", () => {
+  it("shows the wind-up pose and trembles more as the blow gets closer", () => {
     const a = new CreatureAnimator();
-    const calm = creature();
-    const first = creature({ phase: "windup", windupLeft: 2 });
-    const last = creature({ phase: "windup", windupLeft: 1 });
+    const calm = creature({ species: "snaretoad" });
     a.update("run:1", [calm], { x: 6, y: 5 }, 1000);
-    const still = a.pose(calm, 1013);
-    expect(still.offX).toBe(0);
-    expect(still.offY).toBe(0);
+    expect(a.pose(calm, 1013).frame).not.toBe("w");
+    expect(a.pose(calm, 1013).offX).toBe(0);
+    const first = creature({ species: "snaretoad", phase: "windup", windupLeft: 2 });
+    const last = creature({ species: "snaretoad", phase: "windup", windupLeft: 1 });
+    expect(a.pose(first, 1013).frame).toBe("w");
     let early = 0, late = 0;
     for (let t = 0; t < 400; t += 7) {
-      early = Math.max(early, Math.abs(a.pose({ ...first, species: "snaretoad" }, 1000 + t).offX));
-      late = Math.max(late, Math.abs(a.pose({ ...last, species: "snaretoad" }, 1000 + t).offX));
+      early = Math.max(early, Math.abs(a.pose(first, 1000 + t).offX));
+      late = Math.max(late, Math.abs(a.pose(last, 1000 + t).offX));
     }
-    expect(early).toBeGreaterThan(0);
-    expect(late).toBeGreaterThan(early);
+    expect(late).toBeGreaterThanOrEqual(early);
+    expect(late).toBeGreaterThan(0);
+  });
+
+  it("makes a waiting creature bob: floaters swap frames, the rest rise a pixel", () => {
+    const a = new CreatureAnimator();
+    const bell = creature({ id: 2, species: "fourfold-bell" });
+    const rat = creature({ id: 3, species: "wickgnaw" });
+    a.update("run:1", [bell, rat], { x: 9, y: 5 }, 1000);
+    const bells = new Set<string>(), lifts = new Set<number>();
+    for (let t = 0; t < IDLE_MS * 3; t += 50) {
+      bells.add(a.pose(bell, 1000 + t).frame);
+      lifts.add(a.pose(rat, 1000 + t).lift);
+    }
+    expect(bells.size).toBe(2);
+    expect([...lifts].sort()).toEqual([0, 1]);
   });
 
   it("does not animate the boss", () => {

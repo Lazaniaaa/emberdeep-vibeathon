@@ -1,11 +1,10 @@
-/// <reference types="node" />
-import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { NO_PERKS } from "./catalog";
 import { ENEMY_HIT_MULT, ENEMY_RECOVERY, MAP_H, MAP_W, enemyCount, floorHeight, floorScale, floorWidth, stepCost } from "./config";
 import { generateFloor, idx, type Dimling } from "./dungeon";
 import { ENEMIES, enemiesAvailableAt, enemyDef } from "./enemies";
 import { attackTiles, reachDirection, windupProgress } from "./enemy-ai";
+import { mobPixels } from "@/render/mob-sprites";
 import { createRng } from "./rng";
 import { applyAction, emptyBag, startRun, type RunState } from "./run";
 
@@ -187,8 +186,8 @@ describe("a creature that strikes after a warning", () => {
 });
 
 describe("the creatures and the floors they live on", () => {
-  it("has a picture for every creature", () => {
-    for (const e of ENEMIES) expect(existsSync(`public/enemies/${e.id}.webp`), e.id).toBe(true);
+  it("has a pixel sprite in every frame for every creature", () => {
+    for (const e of ENEMIES) for (const frame of ["a", "b", "w"] as const) expect(mobPixels(e.id, frame), `${e.id} ${frame}`).toHaveLength(16);
   });
 
   it("gives every creature a reach, a wind-up and a way to be beaten", () => {

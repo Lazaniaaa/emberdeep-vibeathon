@@ -13,7 +13,6 @@ import { roundShare } from "@/game/economy";
 import { bossAlive, currentRadius, currentStepCost, onRift, onStairs, type RunAction, type RunState } from "@/game/run";
 import { percent } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { preloadEnemies } from "@/render/enemy-art";
 import { COLORS, TILE, cameraFor, drawRun, type View } from "@/render/renderer";
 import { settle, useRun } from "@/state/run-store";
 import { holdRunLock } from "@/state/run-lock";
@@ -53,7 +52,6 @@ export function RunView() {
     return () => ro.disconnect();
   }, []);
 
-  useEffect(() => { preloadEnemies(); }, []);
 
   const dispatch = useCallback((action: RunAction) => {
     const next = act(action);
