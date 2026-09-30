@@ -67,12 +67,49 @@ describe("saved run validation", () => {
       ["seen with junk", r => { r.floor.seen[3] = 7; }],
       ["log with junk", r => { r.messages = [1, 2]; }],
       ["runId as number", r => { r.runId = 12; }],
+      ["prop of an unknown kind", r => { r.floor.props = [{ id: 1, x: 8, y: 10, kind: "chandelier", hp: 5, maxHp: 5 }]; }],
+      ["prop off the map", r => { r.floor.props = [{ id: 1, x: 80, y: 10, kind: "urn", hp: 5, maxHp: 5 }]; }],
+      ["prop without health", r => { r.floor.props = [{ id: 1, x: 8, y: 10, kind: "urn" }]; }],
+      ["level beyond the last", r => { r.level = 16; }],
+      ["level zero", r => { r.level = 0; }],
+      ["negative experience", r => { r.xp = -4; }],
+      ["gear nobody makes", r => { r.gear = ["trident"]; }],
     ];
     for (const [name, damage] of holes) {
       const run = good();
       damage(run);
       expect(validSavedRun(run), name).toBe(false);
     }
+  });
+});
+
+describe("saves from before props and levels", () => {
+  it("are still accepted, and played as level 1 on a floor with nothing to smash", async () => {
+    const run = JSON.parse(JSON.stringify(startRun({ seed: 7, flasks: 2, perks: NO_PERKS, weaponDamage: 1, bag: emptyBag() })));
+    delete run.floor.props; delete run.xp; delete run.level; delete run.gear; delete run.smashed;
+    expect(validSavedRun(run)).toBe(true);
+    saved.set("emberdeep-run-v1", JSON.stringify({ state: { run, prevPlayer: null }, version: 0 }));
+    await useRun.persist.rehydrate();
+    const restored = useRun.getState().run!;
+    expect(restored.floor.props).toEqual([]);
+    expect([restored.level, restored.xp, restored.gear, restored.smashed]).toEqual([1, 0, [], 0]);
+    useRun.getState().act({ type: "wait" });
+    expect(useRun.getState().run?.steps).toBe(1);
+    useRun.getState().clear();
+  });
+
+  it("keep their props, level and gear through a round trip", async () => {
+    useRun.getState().start({ seed: 11, flasks: 2, perks: NO_PERKS, weaponDamage: 16, bag: emptyBag() });
+    const before = { ...useRun.getState().run!, level: 4, xp: 7, gear: ["sword" as const], smashed: 3 };
+    useRun.setState({ run: before });
+    const snapshot = saved.get("emberdeep-run-v1")!;
+    useRun.getState().clear();
+    saved.set("emberdeep-run-v1", snapshot);
+    await useRun.persist.rehydrate();
+    const after = useRun.getState().run!;
+    expect(after.floor.props.length).toBeGreaterThan(0);
+    expect([after.level, after.xp, after.gear, after.smashed]).toEqual([4, 7, ["sword"], 3]);
+    useRun.getState().clear();
   });
 });
 

@@ -1,5 +1,6 @@
 import { BOSS_DEPTH, BOSS_HP, BOSS_SIZE, HP_SCALE, enemyCount, floorHeight, floorScale, floorWidth } from "./config";
 import { enemyDef, pickEnemy, type EnemySpecies } from "./enemies";
+import { PROPS, propCounts, propDef, type PropKind } from "./props";
 import { chance, int, type Rng } from "./rng";
 
 export const WALL = 0;
@@ -9,6 +10,9 @@ export type Point = { x: number; y: number };
 
 export type ItemKind = "gold" | "crystal" | "oil" | "chest" | "vault" | "hoard";
 export type Item = Point & { id: number; kind: ItemKind };
+
+/** Something to smash (see props.ts). It fills its tile until it breaks. */
+export type Prop = Point & { id: number; kind: PropKind; hp: number; maxHp: number };
 
 export type DimlingPhase = "idle" | "windup" | "recovery";
 
@@ -43,6 +47,8 @@ export type Floor = {
   stairs: Point;
   items: Item[];
   dimlings: Dimling[];
+  /** Things to smash. Descents saved before they existed have none. */
+  props: Prop[];
   revealed: boolean;
 };
 
@@ -326,7 +332,7 @@ export function generateFloor(rng: Rng, depth: number, options: FloorOptions): F
   const floor: Floor = {
     depth, theme: themeForDepth(depth), roomCount: authored?.roomCount ?? layout!.rooms.length,
     w, h, tiles, seen: new Array<number>(w * h).fill(0), spawn,
-    stairs, items: [], dimlings: [], revealed: false,
+    stairs, items: [], dimlings: [], props: [], revealed: false,
   };
 
   const dist = distances(floor, spawn);
@@ -395,6 +401,42 @@ export function generateFloor(rng: Rng, depth: number, options: FloorOptions): F
     floor.dimlings.push({
       ...c, id: nextId++, hp, maxHp: hp, awake: false, species, phase: "idle", windupLeft: 0, cooldown: 0, aim: null,
     });
+  }
+
+  // Urns, crates and barrels stand in the rooms. One is never put where it would shut a route: every open tile must
+  // still be reachable without breaking anything, and none sits against the rift or the stairs.
+  const reachable = (blocked: Set<number>) => {
+    const seen = new Set<number>([at(spawn.x, spawn.y)]);
+    const queue: Point[] = [spawn];
+    for (let head = 0; head < queue.length; head++) {
+      const p = queue[head];
+      for (const d of DIRS) {
+        const nx = p.x + d.x, ny = p.y + d.y;
+        if (!isFloor(floor, nx, ny) || seen.has(at(nx, ny)) || blocked.has(at(nx, ny))) continue;
+        seen.add(at(nx, ny));
+        queue.push({ x: nx, y: ny });
+      }
+    }
+    return seen.size;
+  };
+  const propTiles = new Set<number>();
+  const counts = propCounts(depth);
+  const placeProp = (kind: PropKind) => {
+    for (let tries = 0; tries < 60; tries++) {
+      const c = place(2);
+      if (!c) return;
+      const k = at(c.x, c.y);
+      const nearExit = manhattan(c, spawn) < 2 || manhattan(c, stairs) < 2;
+      const blocked = new Set(propTiles).add(k);
+      if (nearExit || reachable(blocked) !== cells.length - blocked.size) { taken.delete(k); continue; }
+      propTiles.add(k);
+      const hp = propDef(kind).hp;
+      floor.props.push({ ...c, id: nextId++, kind, hp, maxHp: hp });
+      return;
+    }
+  };
+  for (const def of PROPS) {
+    for (let i = 0; i < count(counts[def.id]); i++) placeProp(def.id);
   }
   return floor;
 }

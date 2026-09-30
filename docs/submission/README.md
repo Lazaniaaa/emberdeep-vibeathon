@@ -22,6 +22,9 @@ A pixel dungeon crawler where your lantern runs on burned $RAREFRIENDS, and ever
   <img src="https://raw.githubusercontent.com/Lazaniaaa/emberdeep-vibeathon/main/docs/screenshots/08-expedition.png" alt="Ember Altar, Expedition tab: pick a Delver and a pack, with the chance of coming back with a haul" width="49%">
   <img src="https://raw.githubusercontent.com/Lazaniaaa/emberdeep-vibeathon/main/docs/screenshots/05-camp-phone.png" alt="The camp at phone size with the on-screen D-pad" width="24%">
 </p>
+<p>
+  <img src="https://raw.githubusercontent.com/Lazaniaaa/emberdeep-vibeathon/main/docs/screenshots/09-smash.png" alt="A descent: a cracked Wooden Crate with its health bar beside the delver, urns, and the level panel with experience under the lantern" width="49%">
+</p>
 
 ## How it uses Rare Friends and $RAREFRIENDS
 
@@ -52,6 +55,7 @@ npm run dev        # http://localhost:5741
 
 - **Camp.** The lobby is a full-screen camp. Walk with WASD/arrows or tap the ground (your Friend walks there); press **E**/Enter, or tap a building, to open it: Dungeon Gate (PLAY), Ember Altar (mint Delvers; lock Delvers, your Friend and RF; send Delvers on expeditions), Armory (weapons, armor, potions), Friend Board (weekly lot, tickets, passes), Vault (the reward round), Welcome Board (how to play), Hall of Delvers (your records). Other delvers in camp are **simulated ambience, not players**.
 - **Descent.** Spend an entry key and buy lantern oil at the Dungeon Gate. Each step burns light; less light means a smaller circle of vision. Collect gold and crystals, fight the creatures (walk into them; they wind up before they hit, and red rings show where the blow lands, so you can step off), take stairs for richer floors, then walk back to the green rift to extract. If your light dies first, everything you carried is lost.
+- **Smash things and level up.** Urns, crates and barrels stand in the rooms: walk into one to hit it. It gives steady gold, experience, sometimes oil (**15% likely with a full lantern, up to 75% when it is nearly out**) and sometimes gear (Rusty Sword +6 damage, Hand Axe +5, Miner's Pickaxe +4 and breaks any prop in one blow). Every descent has 15 levels; each one pours **+10 light** into the lantern and adds **+2 damage** (a dagger hits for 16). Buff choices on level-up are planned, not built.
 - **Floor 7** is guarded by **Cerberus**: a 2×2, three-headed hound with 150 HP. It seals the stairs and leaves a hoard chest when it falls.
 - **Controls.** WASD/arrows to move, Space to wait, E/Enter to use stairs or the rift, keys 1-7 for potions. On touch: on-screen D-pad or tap. Mute and reduced-motion toggles are in the top bar.
 - **Not an SDK game**, so the 960 × 640 container does not apply. The game is full-screen and responsive.
@@ -79,9 +83,11 @@ npm run dev        # http://localhost:5741
 | Sealed Vault (floor 3+) holds a Soul Sigil (a free Delver) | 30%; rarity 62% Common, 27% Rare, 9% Epic, 2% Legendary |
 | Cerberus Hoard holds a Soul Sigil | 40% (plus a guaranteed Healing Draught and Rage Potion) |
 | Chest holds a potion | 25% |
+| Oil from a broken prop | 15% with a full lantern, rising to 75% as it empties (4-14 light) |
+| Gear from a broken crate / barrel | 6% / 16% (Rusty Sword, Hand Axe or Miner's Pickaxe, each once per descent) |
 | Expedition returns with a haul (no pack / Scout / Ranger / Vanguard) | 45% / 58% / 70% / 82%; the haul is ×0.6 to ×15 of 1 key, 1 ticket and 120 gold, 84% of them Common (×0.6–1.2) |
 
-**Expected reward.** The round pool pays out at most the 60% that went into it (another 7% goes to the lock pool), so the crowd's *average* return from descents is 60% of spend at best; yours depends on your share of the gold. **Return cap:** nobody takes back more than 160% of what they put into descents in a round (entry keys plus oil, deaths included), so a top build earns +20% to +60% a round, not a multiple; whatever the cap holds back stays in the pool for the next round. The other players in each round are a **simulated crowd** whose gold-per-RF (1.8, a bit below the roughly 2.1 average of the mixed crowd the simulation uses) is an assumption, and the numbers below come from bots that dodge every telegraphed blow and rarely die, so read them as an upper bound for real players.
+**Expected reward.** The round pool pays out at most the 60% that went into it (another 7% goes to the lock pool), so the crowd's *average* return from descents is 60% of spend at best; yours depends on your share of the gold. **Return cap:** nobody takes back more than 160% of what they put into descents in a round (entry keys plus oil, deaths included), so a top build earns +20% to +60% a round, not a multiple; whatever the cap holds back stays in the pool for the next round. The other players in each round are a **simulated crowd** whose gold-per-RF (3.0, a bit below the roughly 3.3 average of the mixed crowd the simulation uses) is an assumption, and the numbers below come from bots that dodge every telegraphed blow, smash every prop and rarely die, so read them as an upper bound for real players.
 
 **Why 25 / 8 / 67.** The vibeathon rules leave the split open (purchases and rewards only need to be simulated and labelled), so this is our design: 25% is a permanent sink, 8% is the link to the Rare Friends market (it buys floor Generations NFTs), and 67% goes back to players. Of that, 60% is shared by gold from descents and 7% by locks, which rewards commitment without taking anything from people who play. Every price goes through the same split, so there is one rule to explain. The percentages and every price are single constants in `src/game/config.ts`. At the simulated reference price of $0.01 per RF, a key is $0.50 and a two-flask descent about $0.90.
 
@@ -118,28 +124,28 @@ Everything is generated by `npm run economy` from the same code the game runs ([
 
 | Strategy (80 seeded descents each) | Cost | Gold banked per RF | vs unperked, 2 flasks |
 | --- | --- | --- | --- |
-| Unperked, 1 / 2 / 3 flasks | 70 / 90 / 110 RF | 0.92 / 1.84 / 2.37 | ×0.50 / ×1.00 / ×1.29 |
-| Friend's Blessing, 2 flasks: held / locked 4 rounds / locked 10+ | 90 RF | 2.06 / 2.45 / 2.58 | ×1.12 / ×1.33 / ×1.41 |
-| Strongest build (Legendary Pathfinder + Hoverer + Blessing), 3 flasks: held / locked 4 rounds / locked 10+ | 110 RF | 4.24 / 4.56 / 4.80 | ×2.31 / ×2.48 / ×2.62 |
+| Unperked, 1 / 2 / 3 flasks | 70 / 90 / 110 RF | 1.36 / 2.80 / 3.55 | ×0.48 / ×1.00 / ×1.27 |
+| Friend's Blessing, 2 flasks: held / locked 4 rounds / locked 10+ | 90 RF | 3.13 / 3.65 / 3.87 | ×1.12 / ×1.30 / ×1.38 |
+| Strongest build (Legendary Pathfinder + Hoverer + Blessing), 3 flasks: held / locked 4 rounds / locked 10+ | 110 RF | 7.31 / 8.58 / 9.07 | ×2.61 / ×3.07 / ×3.24 |
 
-Return on what you put into descents (keys and oil), one delver against a crowd that spent 20,000 RF, at the demo's crowd skill (1.8 gold per RF) and at a weaker and a stronger crowd. † = the 160% cap bound.
+Return on what you put into descents (keys and oil), one delver against a crowd that spent 20,000 RF, at the demo's crowd skill (3.0 gold per RF) and at a weaker and a stronger crowd. † = the 160% cap bound.
 
-| Strategy | Weaker crowd (1.2) | Demo crowd (1.8) | Stronger crowd (4.0) |
+| Strategy | Weaker crowd (1.5) | Demo crowd (3.0) | Stronger crowd (4.8) |
 | --- | --- | --- | --- |
-| Unperked, 2 flasks | 90% | 61% | 28% |
-| Friend's Blessing, held | 100% | 68% | 32% |
-| Strongest build, held | 160% † | 132% | 63% |
-| Strongest build, locked 10+ rounds | 160% † | 147% | 71% |
-| Strongest build, locked 10+ rounds and 5,000 RF staked | 160% † | 157% | 77% |
+| Unperked, 2 flasks | 108% | 56% | 36% |
+| Friend's Blessing, held | 120% | 62% | 40% |
+| Strongest build, held | 160% † | 136% | 89% |
+| Strongest build, locked 10+ rounds | 160% † | 160% † | 108% |
+| Strongest build, locked 10+ rounds and 5,000 RF staked | 160% † | 160% † | 116% |
 
 Whole rounds with a mixed crowd, split by gold as the game does it (RF received from the round pool / RF spent):
 
 | Crowd: unperked / Blessing held / strongest held / strongest locked | Paid out / spent | Unperked | Blessing held | Strongest held | Strongest locked |
 | --- | --- | --- | --- | --- | --- |
-| 70 / 20 / 10 / 0 | 60.0% | 52% | 58% | 110% | n/a |
-| 70 / 20 / 0 / 10 | 60.0% | 50% | 56% | n/a | 127% |
-| 50 / 30 / 0 / 20 | 60.0% | 43% | 48% | n/a | 110% |
-| 20 / 30 / 0 / 50 | 60.0% | 32% | 36% | n/a | 81% |
+| 70 / 20 / 10 / 0 | 60.0% | 50% | 56% | 126% | n/a |
+| 70 / 20 / 0 / 10 | 60.0% | 47% | 53% | n/a | 145% |
+| 50 / 30 / 0 / 20 | 60.0% | 39% | 44% | n/a | 122% |
+| 20 / 30 / 0 / 50 | 60.0% | 28% | 31% | n/a | 85% |
 | 0 / 0 / 0 / 100 | 60.0% | n/a | n/a | n/a | 60% |
 
 What one lock farms from the lock pool, alone in the demo's crowd of lockers (RF):
@@ -152,10 +158,10 @@ What one lock farms from the lock pool, alone in the demo's crowd of lockers (RF
 | Rare Friend (500 RF) | 3.49 | 44.65 | 0.9% |
 | Stake (5,000 RF) | 34.14 | 434.21 | 0.9% |
 
-- **Do the top builds earn too much?** They land in the +20% to +60% band and cannot leave it. Against the demo's crowd the strongest build returns +32% while held, +47% locked for 10+ rounds and +57% with a full stake; the 160% cap catches everything above that. Held, it banks ×2.31 the gold of an unperked delver; locked for 10+ rounds it is at ×2.62. Its edge is paid by the other delvers' gold, not by new tokens, and it is self-limiting: the more delvers run the locked build, the smaller each one's gold share, down to 60% for everyone when all have it.
+- **Do the top builds earn too much?** They land in the +20% to +60% band and cannot leave it. Against the demo's crowd the strongest build returns +36% while held, and locked for 10+ rounds or with a full stake it reaches the +60% cap, which catches everything above that. Held, it banks ×2.61 the gold of an unperked delver; locked for 10+ rounds it is at ×3.24. Its edge is paid by the other delvers' gold, not by new tokens, and it is self-limiting: the more delvers run the locked build, the smaller each one's gold share, down to 60% for everyone when all have it.
 - **What do locks pay?** A modest 0.9% of the locked value per round in the demo, so passive farming is a bonus, not a business: a minted Delver would take over 100 rounds to repay its mint from the lock pool alone. The pool is fixed by spend, so more lockers means a smaller cut for each (the report varies the crowd of lockers from 8,000 to 64,000 passive gold). Breaking a lock early costs about 14 times a round's yield, so hopping in and out does not pay.
-- **What if the crowd assumptions are wrong?** The 1.8 gold per RF and the 16,000 passive gold of other lockers only decide how the demo splits the pools, never how much they hold. If the real crowd is weaker (1.2 gold per RF), the top builds hit the 160% cap instead of running past 200% and an unperked delver gets back 90% instead of 61%; if it is stronger (4.0), everyone gets less (the table above). The report also varies crowd size.
-- **Are expeditions a faucet?** No. An average trip is worth about half of what it cost at every pack tier (55–58%, counting a key as 50 RF, a ticket as 20 RF and gold at what it is worth in the demo's pool), because packs are priced to buy a steadier trip, not a better deal. A successful ×1 haul is worth about the price of a trip with no pack, so a trip pays for itself only when it succeeds; a failure loses the whole price, 40% of which is burned. A ×5 haul (about 0.4–0.7% of trips) is worth roughly five prices. Keys are capped at 30 in stock.
+- **What if the crowd assumptions are wrong?** The 3.0 gold per RF and the 16,000 passive gold of other lockers only decide how the demo splits the pools, never how much they hold. If the real crowd is weaker (1.5 gold per RF), the top builds hit the 160% cap instead of running well past it and an unperked delver gets back 108% instead of 56%; if it is stronger (4.8), everyone gets less (the table above). The report also varies crowd size.
+- **Are expeditions a faucet?** No. An average trip is worth about half of what it cost at every pack tier (47–49%, counting a key as 50 RF, a ticket as 20 RF and gold at what it is worth in the demo's pool), because packs are priced to buy a steadier trip, not a better deal. A successful ×1 haul is worth about the price of a trip with no pack, so a trip pays for itself only when it succeeds; a failure loses the whole price, 40% of which is burned. A ×5 haul (about 0.4–0.7% of trips) is worth roughly five prices. Keys are capped at 30 in stock.
 - **What the numbers do not show.** Bots are not players, nothing here is measured on people, and the returns leave out the RF spent once on Delvers, weapons and passes. Because a round closes on a button in the demo, you can fast-forward weeks; each closed round opens with one simulated crowd week of spend, so that is simulated time, not free RF. Balance against real play is the main open question.
 
 **Token Activity counters** ("You burned", "World burn") are simulated; the world counter starts from a simulated seed of 1,284,310 RF.
@@ -175,7 +181,7 @@ The rules that matter already live in small pure functions (`splitSpend` and `se
 
 ## Checks, credits and known issues
 
-- **Checks run:** `npm test` (185 tests: economy and round settlement, locks and the lock pool, expeditions, fixed Delver supply, creature species and telegraphed attacks (wind-up, dodge, recovery, ward), bigger floors 1-3, Cerberus 2×2 movement/combat/loot, potions, save recovery and multi-tab safety, wallet request ordering, wallet log reads split to fit the RPC's block-range limit, creature sprites and animation, camp and art validation), `npm run typecheck`, `npm run lint` (3 known Fast Refresh warnings in shadcn/ui files), `npm run build`. `npm run economy` regenerates the [economy report](https://github.com/Lazaniaaa/emberdeep-vibeathon/blob/main/docs/economy-report.md). The production build was played end to end in a desktop browser (camp → descent → extraction → report), a creature wind-up was driven in the browser and stepping off the marked rings gave a miss for only the step's light, and the Playwright script `npm run smoke` passed against the production build of this version (Microsoft Edge, desktop and a 390 px phone-size viewport: camp, mint, descent, report, no console errors). The wallet read was also run against the live Robinhood Chain RPC for a holder address (Friends found, sprite read). Locking, staking, maturing, harvesting and breaking a lock were also driven end to end in the browser and the balance reconciled to the RF, and so was a full expedition (mint, send with a pack, countdown, Delver unavailable to descend, collect). An independent code review was done on the build before the creatures and the full-screen descent were added, and its findings were fixed; those later changes are covered by tests and the browser checks above but have not had an independent review.
+- **Checks run:** `npm test` (206 tests: economy and round settlement, locks and the lock pool, expeditions, fixed Delver supply, creature species and telegraphed attacks (wind-up, dodge, recovery, ward), bigger floors 1-3, Cerberus 2×2 movement/combat/loot, potions, save recovery and multi-tab safety, wallet request ordering, wallet log reads split to fit the RPC's block-range limit, creature sprites and animation, props, levels and gear, old saves, camp and art validation), `npm run typecheck`, `npm run lint` (3 known Fast Refresh warnings in shadcn/ui files), `npm run build`. `npm run economy` regenerates the [economy report](https://github.com/Lazaniaaa/emberdeep-vibeathon/blob/main/docs/economy-report.md). The production build was played end to end in a desktop browser (camp → descent → extraction → report), a creature wind-up was driven in the browser and stepping off the marked rings gave a miss for only the step's light, and the Playwright script `npm run smoke` passed against the production build of this version (Microsoft Edge, desktop and a 390 px phone-size viewport: camp, mint, descent, report, no console errors). The wallet read was also run against the live Robinhood Chain RPC for a holder address (Friends found, sprite read). Locking, staking, maturing, harvesting and breaking a lock were also driven end to end in the browser and the balance reconciled to the RF, and so was a full expedition (mint, send with a pack, countdown, Delver unavailable to descend, collect). An independent code review was done on the build before the creatures and the full-screen descent were added, and its findings were fixed; those later changes are covered by tests and the browser checks above but have not had an independent review.
 - **Not done:** the builder has played the game with a real wallet connected, but on the build before the creatures and the full-screen descent; the current build has not been played with a wallet yet. The phone check is an emulated viewport, not a physical phone.
 - **Known limitations:** game and economy state live in the browser and can be tampered with; a live version would need server-side or on-chain verification of each run before payouts. No live RF spending, real NFT purchases, on-chain payouts or automatic weekly draw (all deliberately simulated). Locks are simulated commitments, not escrow, and the demo lets you fast-forward rounds with a button. An expedition takes 5 seconds in the preview, uses the device clock, and its roll is stored in the browser. Most players will not reach Cerberus on floor 7 without buying extra oil. On the floor 7 arena, one tile of shaded floor along the edges is treated as wall. Progress is stored per browser. The walkable area is traced in whole tiles over painted floors, so on floors 4-7 some passages in the pictures are narrower than the two tiles the delver can use and his sprite can overlap the stone edge there; the passages of floor 2 were widened in the picture (`scripts/map-patches.mjs`). The floor slabs of all seven pictures are redrawn on the game's 32px tile grid (`scripts/floor-regrid.mjs`), so a step, a danger ring and a creature each sit on exactly one slab.
 - **Credits:** see [NOTICE.md](https://github.com/Lazaniaaa/emberdeep-vibeathon/blob/main/NOTICE.md). Wallet reading adapts helpers from [FriendSDK](https://github.com/spokesz/friendsdk) (Apache-2.0). Rare Friends artwork belongs to Rare Friends. Production publication would need separate Rare Friends review.

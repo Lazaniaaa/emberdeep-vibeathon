@@ -4,9 +4,11 @@ import {
   stepCost,
 } from "./config";
 import { POTIONS, POTION_DROP_WEIGHTS, type Perks, type PotionId } from "./catalog";
-import { dimlingDistance, distances, footprint, generateFloor, idx, isFloor, visibleSet, type Dimling, type Floor, type Point } from "./dungeon";
+import { dimlingDistance, distances, footprint, generateFloor, idx, isFloor, visibleSet, type Dimling, type Floor, type Point, type Prop } from "./dungeon";
 import { attackTiles, reachDirection } from "./enemy-ai";
 import { enemyDef, enemyName } from "./enemies";
+import { BOSS_XP, CHEST_XP, HOARD_XP, LEVEL_DAMAGE, LEVEL_LIGHT, MAX_LEVEL, VAULT_XP, killXp, levelDamage, xpToNext } from "./levels";
+import { GEAR, GEAR_DUPLICATE_XP, GEAR_IDS, gearDamage, oilChance, propDef, type GearId } from "./props";
 import { chance, createRng, int, weighted, type Rng } from "./rng";
 
 export type RunEvent =
@@ -15,7 +17,9 @@ export type RunEvent =
   /** A creature started winding up: its next blow is marked on the floor. */
   | "warn"
   /** A creature struck and the delver had stepped aside. */
-  | "miss";
+  | "miss"
+  /** A prop was hit and cracked; it broke; a piece of gear came out of one; the delver reached a new level. */
+  | "smash" | "break" | "gear" | "levelup";
 
 export type PotionBag = Record<PotionId, number>;
 
@@ -56,6 +60,13 @@ export type RunState = {
   rage?: number;
   /** Turns of Regeneration left. */
   regen?: number;
+  /** Experience toward the next level and the level itself (see levels.ts). Saves from before levels omit both: level 1. */
+  xp?: number;
+  level?: number;
+  /** Gear found in props this descent (see props.ts). */
+  gear?: GearId[];
+  /** Props broken this descent. */
+  smashed?: number;
 };
 
 export type RunAction =
@@ -89,10 +100,18 @@ export function startRun(setup: RunSetup): RunState {
     nightVision: 0, ward: 0, perks: setup.perks, weaponDamage: setup.weaponDamage,
     status: "playing", messages: ["Your lantern flickers to life. The deep is waiting."],
     events: [], deepest: 1, bossSlain: false, rage: 0, regen: 0, runId: setup.runId,
+    xp: 0, level: 1, gear: [], smashed: 0,
   };
   reveal(state);
   return state;
 }
+
+export const levelOf = (s: RunState) => s.level ?? 1;
+export const xpOf = (s: RunState) => s.xp ?? 0;
+export const propsOf = (floor: Floor): Prop[] => floor.props ?? [];
+
+/** Damage of one blow before a Rage Potion: the weapon, perks, the delver's level and the gear found this descent. */
+export const baseDamage = (s: RunState) => s.weaponDamage + s.perks.damage + levelDamage(levelOf(s)) + gearDamage(s.gear);
 
 export function currentRadius(state: RunState) {
   if (state.light <= 0 && state.nightVision > 0) return 2;
@@ -150,13 +169,14 @@ function pickup(state: RunState) {
       const g = loot(state, int(rng, 10, 20), "gold");
       const c = loot(state, int(rng, 2, 5), "crystal");
       state.gold += g; state.crystals += c; state.events.push("chest");
-      let text = `Chest: +${g} gold, +${c} crystals`;
+      let text = `Chest: +${g} gold, +${c} crystals, +${CHEST_XP} xp`;
       if (chance(rng, 0.25)) {
         const p = weighted(rng, POTION_DROP_WEIGHTS);
         state.bag[p]++; state.found[p]++; text += `, ${POTIONS[p].name}`;
       }
       say(state, text);
       rollTicket(state);
+      gainXp(state, CHEST_XP);
       break;
     }
     case "hoard": {
@@ -169,6 +189,7 @@ function pickup(state: RunState) {
       state.events.push("hoard");
       say(state, text);
       rollTicket(state); rollTicket(state); rollTicket(state);
+      gainXp(state, HOARD_XP);
       break;
     }
     case "vault": {
@@ -185,9 +206,70 @@ function pickup(state: RunState) {
         say(state, text);
         rollTicket(state);
       }
+      gainXp(state, VAULT_XP);
       break;
     }
   }
+}
+
+/** Adds experience. Every level reached pours oil into the lantern and, through baseDamage, hardens every blow. */
+function gainXp(state: RunState, amount: number) {
+  let level = levelOf(state);
+  let xp = xpOf(state) + amount;
+  while (level < MAX_LEVEL && xp >= xpToNext(level)) {
+    xp -= xpToNext(level);
+    level++;
+    state.light += LEVEL_LIGHT;
+    state.events.push("levelup");
+    say(state, `Level ${level}! +${LEVEL_LIGHT} light, +${LEVEL_DAMAGE} damage.`);
+  }
+  state.level = level;
+  state.xp = level >= MAX_LEVEL ? 0 : xp;
+}
+
+/** One blow at a prop. When it breaks it gives gold, experience, maybe oil (likelier the lower the lantern) and maybe gear. */
+function smash(state: RunState, prop: Prop) {
+  const def = propDef(prop.kind);
+  const raging = (state.rage ?? 0) > 0;
+  let dmg = Math.round(baseDamage(state) * (raging ? RAGE_MULT : 1));
+  if (raging) state.rage = (state.rage ?? 0) - 1;
+  // A pickaxe splits anything in one blow.
+  if ((state.gear ?? []).includes("pickaxe")) dmg = Math.max(dmg, prop.hp);
+  prop.hp -= dmg;
+  if (prop.hp > 0) {
+    state.events.push("smash");
+    say(state, `You hit the ${def.name} for ${dmg}; it cracks (${prop.hp}/${prop.maxHp} left)`);
+    return;
+  }
+  state.floor.props = propsOf(state.floor).filter(p => p !== prop);
+  state.smashed = (state.smashed ?? 0) + 1;
+  state.events.push("break");
+  const rng = state.rng;
+  const parts: string[] = [];
+  const g = loot(state, int(rng, def.gold[0], def.gold[1]), "gold");
+  state.gold += g;
+  parts.push(`+${g} gold`);
+  if (chance(rng, oilChance(state.light, state.startLight))) {
+    const oil = int(rng, def.oil[0], def.oil[1]);
+    state.light += oil;
+    state.events.push("oil");
+    parts.push(`+${oil} light`);
+  }
+  let xp = int(rng, def.xp[0], def.xp[1]);
+  if (def.gear > 0 && chance(rng, def.gear)) {
+    const missing = GEAR_IDS.filter(id => !(state.gear ?? []).includes(id));
+    if (missing.length) {
+      const found = missing[int(rng, 0, missing.length - 1)];
+      state.gear = [...(state.gear ?? []), found];
+      state.events.push("gear");
+      parts.push(`${GEAR[found].name} (${GEAR[found].blurb})`);
+    } else {
+      xp += GEAR_DUPLICATE_XP;
+    }
+  }
+  parts.push(`+${xp} xp`);
+  say(state, `${def.name} breaks: ${parts.join(", ")}`);
+  gainXp(state, xp);
 }
 
 function rollTicket(state: RunState) {
@@ -272,6 +354,7 @@ function creatureAct(state: RunState, d: Dimling, visible: Set<number>, nearest:
     .map(step => ({ x: d.x + step.x, y: d.y + step.y }))
     .filter(p => isFloor(floor, p.x, p.y)
       && !(p.x === player.x && p.y === player.y)
+      && !propsOf(floor).some(pr => pr.x === p.x && pr.y === p.y)
       && !floor.dimlings.some(o => o !== d && footprint(o).some(oc => oc.x === p.x && oc.y === p.y))
       && nearest([p]) < here)
     .sort((a, b) => nearest([a]) - nearest([b]));
@@ -306,6 +389,7 @@ function dimlingsAct(state: RunState) {
       .map(p => ({ p, cells: footprint({ x: p.x, y: p.y, size: d.size }) }))
       .filter(({ cells }) => cells.every(c => isFloor(floor, c.x, c.y))
         && !cells.some(c => c.x === player.x && c.y === player.y)
+        && !cells.some(c => propsOf(floor).some(pr => pr.x === c.x && pr.y === c.y))
         && !floor.dimlings.some(o => o !== d && footprint(o).some(oc => cells.some(c => c.x === oc.x && c.y === oc.y)))
         && nearest(cells) < here)
       .sort((a, b) => nearest(a.cells) - nearest(b.cells));
@@ -337,6 +421,7 @@ function slayBoss(state: RunState, boss: Dimling) {
   if (state.perks.lightOnKill) state.light += state.perks.lightOnKill;
   state.events.push("boss");
   say(state, "Cerberus falls. A hoard chest lies where it stood, and the stairs are open.");
+  gainXp(state, BOSS_XP);
 }
 
 function endTurn(state: RunState) {
@@ -363,7 +448,7 @@ export function applyAction(prev: RunState, action: RunAction): RunState {
       const target = state.floor.dimlings.find(d => footprint(d).some(c => c.x === tx && c.y === ty));
       if (target) {
         const raging = (state.rage ?? 0) > 0;
-        const dmg = Math.round((state.weaponDamage + state.perks.damage) * (raging ? RAGE_MULT : 1));
+        const dmg = Math.round(baseDamage(state) * (raging ? RAGE_MULT : 1));
         if (raging) state.rage = (state.rage ?? 0) - 1;
         target.hp -= dmg;
         if (target.hp <= 0 && target.boss) {
@@ -374,12 +459,20 @@ export function applyAction(prev: RunState, action: RunAction): RunState {
           state.gold += g; state.kills++;
           if (state.perks.lightOnKill) state.light += state.perks.lightOnKill;
           state.events.push("kill");
-          say(state, `${enemyName(target.species)} defeated: +${g} gold${state.perks.lightOnKill ? `, +${state.perks.lightOnKill} light` : ""}`);
+          const xp = killXp(state.depth);
+          say(state, `${enemyName(target.species)} defeated: +${g} gold, +${xp} xp${state.perks.lightOnKill ? `, +${state.perks.lightOnKill} light` : ""}`);
           rollTicket(state);
+          gainXp(state, xp);
         } else {
           state.events.push("hit");
           say(state, `You hit ${target.boss ? "Cerberus" : enemyName(target.species)} for ${dmg} (${target.hp}/${target.maxHp} left)`);
         }
+        endTurn(state);
+        break;
+      }
+      const prop = propsOf(state.floor).find(pr => pr.x === tx && pr.y === ty);
+      if (prop) {
+        smash(state, prop);
         endTurn(state);
         break;
       }

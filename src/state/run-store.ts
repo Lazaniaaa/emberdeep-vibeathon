@@ -3,6 +3,8 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { applyAction, startRun, type RunAction, type RunSetup, type RunState } from "@/game/run";
 import { floorHeight, floorWidth } from "@/game/config";
 import { isSpecies } from "@/game/enemies";
+import { MAX_LEVEL } from "@/game/levels";
+import { isGearId, isPropKind } from "@/game/props";
 import { POTION_IDS } from "@/game/catalog";
 import { useGame } from "@/state/store";
 
@@ -36,6 +38,11 @@ const isPointIn = (value: unknown, w: number, h: number) => {
 const validItem = (w: number, h: number) => (value: unknown) => {
   const item = object(value);
   return isPointIn(item, w, h) && Number.isSafeInteger(item.id) && ITEM_KINDS.includes(item.kind as string);
+};
+
+const validProp = (w: number, h: number) => (value: unknown) => {
+  const prop = object(value);
+  return isPointIn(prop, w, h) && Number.isSafeInteger(prop.id) && isPropKind(prop.kind) && finite(prop.hp) && finite(prop.maxHp);
 };
 
 const validDimling = (w: number, h: number) => (value: unknown) => {
@@ -78,6 +85,12 @@ export function validSavedRun(value: unknown): value is RunState {
     && floor.tiles[at(floor.stairs)] === 1
     && Array.isArray(floor.items) && floor.items.every(validItem(W, H))
     && Array.isArray(floor.dimlings) && floor.dimlings.every(validDimling(W, H))
+    // Props, levels and gear came later; a save from before them has none of these.
+    && (floor.props === undefined || (Array.isArray(floor.props) && floor.props.every(validProp(W, H))))
+    && (run.level === undefined || (Number.isSafeInteger(run.level) && (run.level as number) >= 1 && (run.level as number) <= MAX_LEVEL))
+    && (run.xp === undefined || (finite(run.xp) && (run.xp as number) >= 0))
+    && (run.smashed === undefined || (Number.isSafeInteger(run.smashed) && (run.smashed as number) >= 0))
+    && (run.gear === undefined || (Array.isArray(run.gear) && run.gear.every(isGearId)))
     && isPointIn(player, W, H)
     && floor.tiles[at(player)] === 1
     && ["left", "right", "up", "down"].includes(player.facing as string)
@@ -123,6 +136,11 @@ export const useRun = create<RunStore>()(persist((set, get) => ({
   merge: (saved, current) => {
     const data = object(saved);
     const run = validSavedRun(data.run) ? data.run : null;
+    if (run) {
+      // Fill in what a save from before props and levels leaves out.
+      run.floor.props ??= [];
+      run.xp ??= 0; run.level ??= 1; run.gear ??= []; run.smashed ??= 0;
+    }
     const prev = object(data.prevPlayer);
     const prevPlayer = run && Number.isSafeInteger(prev.x) && Number.isSafeInteger(prev.y)
       ? { x: prev.x as number, y: prev.y as number } : null;

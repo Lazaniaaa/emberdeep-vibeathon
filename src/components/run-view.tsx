@@ -10,7 +10,9 @@ import { playSfx } from "@/audio/sfx";
 import { lootMultiplier } from "@/game/config";
 import { POTIONS, POTION_IDS, type PotionId } from "@/game/catalog";
 import { roundShare } from "@/game/economy";
-import { bossAlive, currentRadius, currentStepCost, onRift, onStairs, type RunAction, type RunState } from "@/game/run";
+import { MAX_LEVEL, xpToNext } from "@/game/levels";
+import { GEAR } from "@/game/props";
+import { baseDamage, bossAlive, currentRadius, currentStepCost, levelOf, onRift, onStairs, xpOf, type RunAction, type RunState } from "@/game/run";
 import { percent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { COLORS, TILE, cameraFor, drawRun, type View } from "@/render/renderer";
@@ -110,6 +112,8 @@ export function RunView() {
   const sealed = bossAlive(run);
   const playing = run.status === "playing";
   const windingUp = run.floor.dimlings.some(d => !d.boss && d.phase === "windup");
+  const level = levelOf(run);
+  const xpPct = level >= MAX_LEVEL ? 100 : Math.min(100, (xpOf(run) / xpToNext(level)) * 100);
 
   return (
     <div ref={root} className="fixed inset-0 overflow-hidden bg-black text-white">
@@ -138,6 +142,20 @@ export function RunView() {
             {run.ward > 0 && <Badge className="bg-crystal text-black"><Shield /> Ward {run.ward}</Badge>}
             {(run.rage ?? 0) > 0 && <Badge className="bg-red-500 text-white">Rage {run.rage}</Badge>}
             {(run.regen ?? 0) > 0 && <Badge className="bg-emerald-500 text-black">Regen {run.regen}</Badge>}
+          </div>
+        </section>
+        <section className="rounded-xl border border-white/20 bg-[#150c2b]/85 px-3 py-1.5 backdrop-blur-sm" aria-label="Level">
+          <div className="flex items-baseline justify-between">
+            <span className="text-[10px] tracking-wider text-muted-foreground uppercase">Level</span>
+            <span className="font-pixel text-lg text-sigil" aria-live="polite">{level}{level >= MAX_LEVEL ? " MAX" : ""}</span>
+          </div>
+          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/10" role="progressbar" aria-valuenow={Math.round(xpPct)} aria-valuemin={0} aria-valuemax={100} aria-label="Experience to the next level">
+            <div className="h-full rounded-full bg-sigil transition-[width]" style={{ width: `${xpPct}%` }} />
+          </div>
+          <div className="mt-1 flex flex-wrap gap-1 text-[10px]">
+            <Badge variant="outline">Damage {baseDamage(run)}</Badge>
+            {level < MAX_LEVEL && <Badge variant="outline">{xpOf(run)}/{xpToNext(level)} xp</Badge>}
+            {(run.gear ?? []).map(g => <Badge key={g} className="bg-gold text-black" title={GEAR[g].blurb}>{GEAR[g].name}</Badge>)}
           </div>
         </section>
         <section className="grid grid-cols-4 gap-1 rounded-xl border border-white/20 bg-[#150c2b]/85 px-2 py-1.5 text-center backdrop-blur-sm" aria-label="Loot this run">

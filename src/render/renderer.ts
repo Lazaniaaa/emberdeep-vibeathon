@@ -2,9 +2,9 @@ import { footprint, idx, visibleSet, type Dimling, type FloorTheme, type Point }
 import { attackTiles, windupProgress } from "@/game/enemy-ai";
 import { DEFAULT_SPECIES } from "@/game/enemies";
 import { ART_DOORWAYS } from "@/game/map-art";
-import { currentRadius, type RunState } from "@/game/run";
+import { currentRadius, propsOf, type RunState } from "@/game/run";
 import { CreatureAnimator, restPose, type Pose } from "./creature-anim";
-import { mobCanvas } from "./mob-art";
+import { mobCanvas, propCanvas } from "./mob-art";
 import { ICONS, drawMask, type Mask } from "./sprites";
 
 export const TILE = 32;
@@ -562,6 +562,23 @@ export function drawRun(ctx: CanvasRenderingContext2D, state: RunState, opts: Dr
     if (!showAt(item)) continue;
     const bob = opts.reducedMotion ? 0 : Math.round(Math.sin(opts.time / 250 + item.id) * 1.5);
     ctx.drawImage(itemSprite(item.kind, floor.theme), item.x * TILE, item.y * TILE + bob, TILE, TILE);
+  }
+
+  // Things to smash stand on their tiles; one that has taken a blow is cracked and shows what is left of it.
+  for (const prop of propsOf(floor)) {
+    if (!showAt(prop)) continue;
+    const left = prop.x * TILE, top = prop.y * TILE;
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.beginPath();
+    ctx.ellipse(left + TILE / 2, top + TILE - 3, TILE * 0.36, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(propCanvas(prop.kind, prop.hp < prop.maxHp ? "b" : "a"), left, top, TILE, TILE);
+    if (prop.hp < prop.maxHp) {
+      ctx.fillStyle = "#000"; ctx.fillRect(left + 5, top + TILE + 1, TILE - 10, 4);
+      ctx.fillStyle = "#333"; ctx.fillRect(left + 6, top + TILE + 2, TILE - 12, 2);
+      ctx.fillStyle = "#e8c070"; ctx.fillRect(left + 6, top + TILE + 2, Math.max(1, Math.round((TILE - 12) * prop.hp / prop.maxHp)), 2);
+    }
   }
 
   // Each creature's picture follows its pose. Reduced motion skips the animation and shows them standing on their tiles.

@@ -3,7 +3,7 @@ import { NO_PERKS, WEAPONS, mergePerks, type Perks } from "./catalog";
 import { dimlingDistance, distances, footprint, idx, isFloor, visibleSet, type Point } from "./dungeon";
 import { attackTiles } from "./enemy-ai";
 import { settleRound } from "./economy";
-import { applyAction, bossAlive, currentRadius, currentStepCost, emptyBag, onRift, onStairs, startRun, type RunState } from "./run";
+import { applyAction, baseDamage, bossAlive, currentRadius, currentStepCost, emptyBag, onRift, onStairs, propsOf, startRun, type RunState } from "./run";
 
 /** Route one step toward `goal` using BFS distances computed from the goal. */
 function stepToward(state: RunState, goal: Point) {
@@ -20,7 +20,7 @@ function stepToward(state: RunState, goal: Point) {
 }
 
 /** `banked` is the gold that counts toward a round: what was carried out alive. */
-export type SimResult = { spent: number; banked: number; depth: number; died: boolean; gold: number };
+export type SimResult = { spent: number; banked: number; depth: number; died: boolean; gold: number; level: number; smashed: number; kills: number };
 
 /** One descent costs its flasks plus one entry key. */
 const runCost = (flasks: number) => flasks * FLASK_PRICE + KEY_PRICE;
@@ -46,7 +46,8 @@ export function simulateRun(seed: number, flasks = 1, perks: Perks = NO_PERKS, g
       continue;
     }
     const fromHere = distances(s.floor, s.player);
-    const target = s.floor.items
+    // Props are loot too: walking into one breaks it a blow at a time.
+    const target = [...s.floor.items, ...propsOf(s.floor)]
       .map(i => ({ i, d: fromHere[idx(s.floor, i.x, i.y)] }))
       .filter(t => t.d > 0)
       .sort((a, b) => a.d - b.d)[0];
@@ -61,7 +62,7 @@ export function simulateRun(seed: number, flasks = 1, perks: Perks = NO_PERKS, g
     s = d ? applyAction(s, { type: "move", dx: d.x, dy: d.y }) : applyAction(s, { type: "wait" });
   }
   const died = s.status !== "extracted";
-  return { spent: runCost(flasks), banked: died ? 0 : s.gold, depth: s.deepest, died, gold: s.gold };
+  return { spent: runCost(flasks), banked: died ? 0 : s.gold, depth: s.deepest, died, gold: s.gold, level: s.level ?? 1, smashed: s.smashed ?? 0, kills: s.kills };
 }
 
 const DIRS4: readonly Point[] = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }];
@@ -114,19 +115,22 @@ export function simulateFogRun(seed: number, flasks = 1, perks: Perks = NO_PERKS
     const reserve = backCost * greed + 6;
 
     const seenNow = visibleSet(s.floor, s.player, currentRadius(s));
-    for (const i of s.floor.items) if (seenNow.has(idx(s.floor, i.x, i.y))) sawItems.add(i.id);
+    for (const i of [...s.floor.items, ...propsOf(s.floor)]) if (seenNow.has(idx(s.floor, i.x, i.y))) sawItems.add(i.id);
 
     // A creature that is winding up marks the tiles it will hit. A careful player steps off them, or strikes first.
     const marked = new Set(s.floor.dimlings.filter(d => !d.boss && d.phase === "windup").flatMap(d => attackTiles(s.floor, d)).map(t => idx(s.floor, t.x, t.y)));
     if (marked.has(idx(s.floor, s.player.x, s.player.y))) {
-      const occupied = new Set(s.floor.dimlings.flatMap(d => footprint(d).map(c => idx(s.floor, c.x, c.y))));
+      const occupied = new Set([
+        ...s.floor.dimlings.flatMap(d => footprint(d).map(c => idx(s.floor, c.x, c.y))),
+        ...propsOf(s.floor).map(p => idx(s.floor, p.x, p.y)),
+      ]);
       const escapes = DIRS4
         .map(o => ({ o, x: s.player.x + o.x, y: s.player.y + o.y }))
         .filter(({ x, y }) => isFloor(s.floor, x, y) && !marked.has(idx(s.floor, x, y)) && !occupied.has(idx(s.floor, x, y)))
         .sort((a, b) => Math.max(0, home[idx(s.floor, a.x, a.y)]) - Math.max(0, home[idx(s.floor, b.x, b.y)]));
       const winding = s.floor.dimlings.find(d => !d.boss && d.phase === "windup" && dimlingDistance(d, s.player) === 1);
       // With a way out, take it; otherwise hit the creature that is next to us and about to strike.
-      if (escapes.length && !(winding && s.light > reserve && winding.hp <= s.weaponDamage + s.perks.damage)) { s = move(escapes[0].o); continue; }
+      if (escapes.length && !(winding && s.light > reserve && winding.hp <= baseDamage(s))) { s = move(escapes[0].o); continue; }
     }
 
     // An awake creature next to us is best cut down before it strikes.
@@ -147,7 +151,7 @@ export function simulateFogRun(seed: number, flasks = 1, perks: Perks = NO_PERKS
     };
     if (s.light <= reserve) { if (goHome()) break; continue; }
 
-    const target = s.floor.items
+    const target = [...s.floor.items, ...propsOf(s.floor)]
       .filter(i => sawItems.has(i.id) && known[idx(s.floor, i.x, i.y)] > 0)
       .sort((a, b) => known[idx(s.floor, a.x, a.y)] - known[idx(s.floor, b.x, b.y)])[0];
     if (target) { s = move(stepAlong(s, knownDistances(s, target))); continue; }
@@ -173,7 +177,7 @@ export function simulateFogRun(seed: number, flasks = 1, perks: Perks = NO_PERKS
     if (goHome()) break;
   }
   const died = s.status !== "extracted";
-  return { spent: runCost(flasks), banked: died ? 0 : s.gold, depth: s.deepest, died, gold: s.gold };
+  return { spent: runCost(flasks), banked: died ? 0 : s.gold, depth: s.deepest, died, gold: s.gold, level: s.level ?? 1, smashed: s.smashed ?? 0, kills: s.kills };
 }
 
 export type SimSummary = { goldPerRf: number; deathRate: number; avgDepth: number };

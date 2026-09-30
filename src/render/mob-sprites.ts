@@ -14,9 +14,9 @@ export type MobPixels = ReadonlyArray<ReadonlyArray<string | null>>;
  * Regions: B body, L light body (belly, snout), D dark body (limbs, ears), S stone or steel, P skin (nose, tongue),
  * W white (claws, teeth, steel tips), A glow (embers, gems), E eyes.
  */
-type Palette = { B: string; L: string; D: string; S: string; P: string; W: string; A: string; E: string };
+export type Palette = { B: string; L: string; D: string; S: string; P: string; W: string; A: string; E: string };
 
-class Grid {
+export class Grid {
   readonly cells: string[][] = Array.from({ length: MOB_SIZE }, () => Array<string>(MOB_SIZE).fill("."));
 
   px(x: number, y: number, c: string) {
