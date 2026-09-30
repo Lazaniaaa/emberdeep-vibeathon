@@ -4,8 +4,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { playSfx } from "@/audio/sfx";
-import { BURN_SHARE, FLASK_LIGHT, FLASK_PRICE, KEY_PRICE, MAX_FLASKS, MAX_KEYS, PASSES, RAFFLE_SHARE } from "@/game/config";
+import { ACTIVE_SHARE, BURN_SHARE, FLASK_LIGHT, FLASK_PRICE, HOLD_FACTOR, KEY_PRICE, LOCK_SHARE, MAX_FLASKS, MAX_KEYS, PASSES, RAFFLE_SHARE } from "@/game/config";
 import { ARMORS, POTIONS, POTION_IDS, WEAPONS } from "@/game/catalog";
+import { FRIEND_LOCK_KEY, heroLockKey, strength } from "@/game/locks";
 import { ticketChance } from "@/game/raffle";
 import { randomSeed } from "@/game/rng";
 import { rf, usd } from "@/lib/format";
@@ -33,13 +34,20 @@ export function DescendTab() {
   const light = game.flasks * FLASK_LIGHT + perks.startLight;
   const weapon = WEAPONS[game.weapon];
 
+  // What a perk is worth depends on whether the thing behind it is locked, and for how long.
+  const lockOf = (key: string) => game.locks.find(l => l.key === key);
+  const lockedTag = (v: HeroVisual, key: string): HeroVisual => (lockOf(key) ? { ...v, subtitle: `${v.subtitle} · locked` } : v);
   const heroChoices: { choice: HeroChoice; visual: HeroVisual; key: string }[] = [
     { choice: { kind: "wanderer" }, visual: WANDERER, key: "wanderer" },
   ];
   if (friend.hasFriend && wallet.selected !== null) {
-    heroChoices.push({ choice: { kind: "friend" }, visual: friendVisual(wallet.selected, wallet.sprite), key: "friend" });
+    const visual = friendVisual(wallet.selected, wallet.sprite, strength(lockOf(FRIEND_LOCK_KEY), game.round));
+    heroChoices.push({ choice: { kind: "friend" }, visual: lockedTag(visual, FRIEND_LOCK_KEY), key: "friend" });
   }
-  for (const h of game.heroes) heroChoices.push({ choice: { kind: "nft", id: h.id }, visual: nftVisual(h), key: h.id });
+  for (const h of game.heroes) {
+    const key = heroLockKey(h.id);
+    heroChoices.push({ choice: { kind: "nft", id: h.id }, visual: lockedTag(nftVisual(h, strength(lockOf(key), game.round)), key), key: h.id });
+  }
   for (const p of game.prizes) heroChoices.push({ choice: { kind: "prize", serial: p.serial }, visual: prizeVisual(p), key: `prize-${p.serial}` });
 
   const isSelected = (c: HeroChoice) => {
@@ -102,7 +110,7 @@ export function DescendTab() {
       <Card>
         <CardHeader>
           <CardTitle className="font-pixel">Choose who descends</CardTitle>
-          <CardDescription>Every character has a base perk. Mint more at the Altar or find a Soul Sigil in a Sealed Vault.</CardDescription>
+          <CardDescription>Every character has a perk, and it works at {Math.round(HOLD_FACTOR * 100)}% strength while you only hold it. Lock it at the Ember Altar to make it stronger over time. Mint more there, or find a Soul Sigil in a Sealed Vault.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Character">
@@ -139,7 +147,7 @@ export function DescendTab() {
           <CardHeader>
             <CardTitle className="font-pixel">Entry keys</CardTitle>
             <CardDescription>
-              One key opens one descent and is spent when you light the lantern. A key costs {KEY_PRICE} RF ({usd(KEY_PRICE)}), split like every other spend: {Math.round(BURN_SHARE * 100)}% burned, {Math.round(RAFFLE_SHARE * 100)}% to the Friend lot, the rest into this round's reward pool.
+              One key opens one descent and is spent when you light the lantern. A key costs {KEY_PRICE} RF ({usd(KEY_PRICE)}), split like every other spend: {Math.round(BURN_SHARE * 100)}% burned, {Math.round(RAFFLE_SHARE * 100)}% to the Friend lot, {Math.round(LOCK_SHARE * 100)}% to the lock pool, {Math.round(ACTIVE_SHARE * 100)}% into this round's reward pool.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap items-center justify-between gap-3">

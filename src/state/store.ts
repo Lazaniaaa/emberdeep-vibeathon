@@ -1,17 +1,21 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import {
-  FAUCET_AMOUNT, FLASK_PRICE, KEY_PRICE, MAX_FLASKS, MAX_KEYS, PASSES, ROUND_SEED_GOLD, ROUND_SEED_POOL, START_BALANCE,
-  START_KEYS, WORLD_BURN_SEED, WORLD_MINT_SEED, type PassId,
+  FAUCET_AMOUNT, FIELD_LOCK_GOLD, FLASK_PRICE, HOLD_FACTOR, KEY_PRICE, MAX_FLASKS, MAX_KEYS, PASSES, ROUND_SEED_GOLD,
+  MAX_ROUND_RETURN, ROUND_SEED_LOCKED, ROUND_SEED_POOL, START_BALANCE, START_KEYS, STAKE_MAX, WORLD_BURN_SEED, WORLD_MINT_SEED, type PassId,
 } from "@/game/config";
 import {
   ARMORS, CLASSES, FAMILY_PERKS, FRIEND_BLESSING, POTIONS, POTION_IDS, RARITIES, RARITY_INFO, WEAPONS, heroPerks,
-  mergePerks, type ArmorId, type HeroNft, type Perks, type PotionId, type Rarity, type WeaponId,
+  mergePerks, scalePerks, type ArmorId, type HeroNft, type Perks, type PotionId, type Rarity, type WeaponId,
 } from "@/game/catalog";
 import {
-  applyClaim, applySpend, mintHero, mintsLeft, rollSigilRarity, settleRound, splitSpend, type Ledger, type LedgerEntry,
+  applyBurn, applyClaim, applySpend, mintHero, mintsLeft, rollSigilRarity, settleRound, splitSpend, type Ledger, type LedgerEntry,
   type RoundSettlement,
 } from "@/game/economy";
+import {
+  FRIEND_LOCK_KEY, FRIEND_LOCK_VALUE, STAKE_LOCK_KEY, addToStake, exitTerms, heroLockKey, heroLockValue, isMature, settleLocks,
+  stakeGoldPct, strength, type Lock,
+} from "@/game/locks";
 import { drawWeek, fieldWeek, passCost, ticketsKept, type DrawResult, type LotFriend } from "@/game/raffle";
 import { randomSeed } from "@/game/rng";
 import { emptyBag, type PotionBag, type RunState } from "@/game/run";
@@ -50,6 +54,8 @@ type State = Ledger & {
   round: number;
   /** Your gold from runs you extracted alive this round. */
   roundGold: number;
+  /** RF you put into descents settled this round (entry keys and oil, deaths included). It sets the round's return cap. */
+  roundSpent: number;
   /** Gold the simulated crowd has banked this round. */
   fieldGold: number;
   potions: PotionBag;
@@ -82,6 +88,10 @@ type State = Ledger & {
   pass: PassId | null;
   /** Week number the pass was bought for. It ends when that week is drawn. */
   passWeek: number;
+  /** Delvers, your wallet's Friend and staked RF that are locked. They age with every closed round. */
+  locks: Lock[];
+  /** Passive gold the simulated crowd's lockers farm this round. */
+  fieldLockGold: number;
 };
 
 type Actions = {
@@ -96,7 +106,19 @@ type Actions = {
   buyKey: (count: number) => void;
   payForRun: () => boolean;
   finishRun: (run: RunState) => RunReport;
-  claimRound: () => (RoundSettlement & { round: number }) | null;
+  /**
+   * Closes the round: the gold-share pool and the lock pool are both shared out, and every lock ages by one round.
+   * `friendHeld` says whether the wallet still holds the Friend that a Friend lock commits; if not, that lock pauses.
+   */
+  claimRound: (friendHeld?: boolean) => (RoundSettlement & { round: number; farmed: number; lockTickets: number }) | null;
+  lockHero: (id: string) => void;
+  lockFriend: () => void;
+  /** Stakes RF in steps of STAKE_STEP. The RF leaves your balance and comes back when you release the stake. */
+  stakeRf: (amount: number) => void;
+  /** Releases a lock. Before maturity that forfeits half of what it farmed and burns part of its value. */
+  unlock: (key: string) => UnlockResult;
+  /** Moves a mature lock's farmed RF into your balance and keeps the lock. */
+  harvest: (key: string) => number;
   /** Settles a paid run whose progress was lost (the tab was closed mid-descent) as a run lost in the dark. */
   abandonRun: () => boolean;
   faucet: () => void;
@@ -109,9 +131,12 @@ type Actions = {
   reset: () => void;
 };
 
+export type UnlockResult = { early: boolean; fee: number; forfeit: number; payout: number; stakeBack: number };
+
 const initial = (): State => ({
   rf: START_BALANCE,
   pool: ROUND_SEED_POOL,
+  locked: ROUND_SEED_LOCKED,
   raffle: 0,
   burned: 0,
   spent: 0,
@@ -120,6 +145,7 @@ const initial = (): State => ({
   keys: START_KEYS,
   round: 1,
   roundGold: 0,
+  roundSpent: 0,
   fieldGold: ROUND_SEED_GOLD,
   potions: { ...emptyBag(), nightVision: 1 },
   weapons: ["fists"],
@@ -147,6 +173,8 @@ const initial = (): State => ({
   lastDraw: null,
   pass: null,
   passWeek: 0,
+  locks: [],
+  fieldLockGold: FIELD_LOCK_GOLD,
 });
 
 const record = (value: unknown): Record<string, unknown> =>
@@ -187,6 +215,15 @@ export function mergeSavedState(persisted: unknown, current: State & Actions): S
   // Saves from before supply caps only know their Delvers, so count those.
   const minted = { ...defaults.minted };
   for (const r of RARITIES) minted[r] = amount(savedMinted[r], heroes.filter(h => h.rarity === r).length, true);
+  // A lock only makes sense for something you still have; a repeated key would farm twice.
+  const seenLocks = new Set<string>();
+  const locks = Array.isArray(saved.locks)
+    ? saved.locks.filter(isLock).filter(l => {
+      if (seenLocks.has(l.key)) return false;
+      seenLocks.add(l.key);
+      return l.kind !== "hero" || heroes.some(h => heroLockKey(h.id) === l.key);
+    })
+    : defaults.locks;
   const hero = record(saved.hero);
   const safeHero: HeroChoice = hero.kind === "nft" && typeof hero.id === "string"
     ? { kind: "nft", id: hero.id }
@@ -196,13 +233,14 @@ export function mergeSavedState(persisted: unknown, current: State & Actions): S
 
   return {
     ...current,
-    rf: amount(saved.rf, defaults.rf), pool: amount(saved.pool, defaults.pool),
+    rf: amount(saved.rf, defaults.rf), pool: amount(saved.pool, defaults.pool), locked: amount(saved.locked, defaults.locked),
     raffle: amount(saved.raffle, defaults.raffle), burned: amount(saved.burned, defaults.burned),
     spent: amount(saved.spent, defaults.spent), returned: amount(saved.returned, defaults.returned),
     crystals: amount(saved.crystals, defaults.crystals, true), potions: safePotions,
     keys: Math.min(MAX_KEYS, amount(saved.keys, defaults.keys, true)),
     round: Math.max(1, amount(saved.round, defaults.round, true)),
     roundGold: amount(saved.roundGold, defaults.roundGold, true),
+    roundSpent: amount(saved.roundSpent, defaults.roundSpent),
     fieldGold: amount(saved.fieldGold, defaults.fieldGold),
     weapons, weapon: typeof saved.weapon === "string" && weapons.includes(saved.weapon as WeaponId)
       ? saved.weapon as WeaponId : "fists",
@@ -228,7 +266,20 @@ export function mergeSavedState(persisted: unknown, current: State & Actions): S
     lastDraw: isDrawResult(saved.lastDraw) ? saved.lastDraw : null,
     pass: saved.pass === "plus" || saved.pass === "pro" ? saved.pass : null,
     passWeek: amount(saved.passWeek, defaults.passWeek, true),
+    locks,
+    fieldLockGold: amount(saved.fieldLockGold, defaults.fieldLockGold),
   };
+}
+
+function isLock(value: unknown): value is Lock {
+  const l = record(value);
+  const keyMatchesKind = l.kind === "friend" ? l.key === FRIEND_LOCK_KEY
+    : l.kind === "stake" ? l.key === STAKE_LOCK_KEY
+      : l.kind === "hero" && typeof l.key === "string" && l.key.startsWith("hero:") && l.key.length < 80;
+  return keyMatchesKind
+    && Number.isSafeInteger(l.since) && (l.since as number) >= 1
+    && [l.value, l.farmed, l.dust].every(n => typeof n === "number" && Number.isFinite(n) && n >= 0)
+    && (l.value as number) <= STAKE_MAX && (l.dust as number) < 1;
 }
 
 function isHero(value: unknown): value is HeroNft {
@@ -282,13 +333,30 @@ function newRunId() {
 export class InsufficientFunds extends Error {}
 export class SoldOut extends Error {}
 
+/** A lock action that cannot be done, with a reason the player can read. */
+export class LockError extends Error {}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
 function spend(state: State, amount: number, label: string): Partial<State> {
   if (amount > state.rf + 1e-9) throw new InsufficientFunds(`Not enough RF for ${label}`);
   const ledger = applySpend(state, amount);
-  const { burned, pooled, raffle } = splitSpend(amount);
-  const entry: LedgerEntry = { at: Date.now(), kind: "spend", label, amount, burned, pooled, raffle };
+  const { burned, pooled, raffle, locked } = splitSpend(amount);
+  const entry: LedgerEntry = { at: Date.now(), kind: "spend", label, amount, burned, pooled, raffle, locked };
   return { ...ledger, log: [entry, ...state.log].slice(0, 60) };
 }
+
+/** A log line for something that is not a spend or a payout split, such as a lock opening. */
+function note(kind: LedgerEntry["kind"], label: string, amount: number, burned = 0): LedgerEntry {
+  return { at: Date.now(), kind, label, amount, burned, pooled: 0, raffle: 0 };
+}
+
+const lockName = (lock: Lock, heroes: HeroNft[]) => {
+  if (lock.kind === "stake") return `${lock.value} RF stake`;
+  if (lock.kind === "friend") return "your Rare Friend";
+  const hero = heroes.find(h => heroLockKey(h.id) === lock.key);
+  return hero ? `${CLASSES[hero.classId].name} #${hero.serial}` : "a Delver";
+};
 
 /** Upgrades a save from an older store version. Each step only adds what the newer version needs. */
 export function migrateSavedState(persisted: unknown, version: number) {
@@ -299,6 +367,11 @@ export function migrateSavedState(persisted: unknown, version: number) {
   if (version < 3) Object.assign(saved, { pass: null, passWeek: 0 });
   // v4 replaced the fixed gold rate with round shares, so the old 250k pool has no meaning any more.
   if (version < 4) Object.assign(saved, { pool: ROUND_SEED_POOL, fieldGold: ROUND_SEED_GOLD, roundGold: 0, round: 1, keys: START_KEYS });
+  // v5 added locks and the lock pool. Older pools already hold their 67%, so they simply play out.
+  if (version < 5) Object.assign(saved, { locks: [], locked: ROUND_SEED_LOCKED, fieldLockGold: FIELD_LOCK_GOLD });
+  // v6 caps what a round pays at a multiple of what went into its descents. A round already in progress does not
+  // know that figure, so assume the gold cost about its worth rather than zero out its payout.
+  if (version < 6) Object.assign(saved, { roundSpent: typeof saved.roundGold === "number" && saved.roundGold > 0 ? saved.roundGold : 0 });
   return saved;
 }
 
@@ -423,6 +496,7 @@ export const useGame = create<State & Actions>()(
           tickets: s.tickets + tickets,
           // Gold from a run that made it home joins this round; gold lost in the dark counts for nobody.
           roundGold: s.roundGold + (extracted ? run.gold : 0),
+          roundSpent: round2(s.roundSpent + KEY_PRICE + s.runSpent),
           crystals: s.crystals + (extracted ? run.crystals : 0),
           potions,
           heroes: [...minted, ...s.heroes],
@@ -449,6 +523,7 @@ export const useGame = create<State & Actions>()(
         if (s.runSpent <= 0) return false;
         set({
           runSpent: 0,
+          roundSpent: round2(s.roundSpent + KEY_PRICE + s.runSpent),
           runId: null,
           // The pack was lost with the tab, exactly as if the delver had died in the dark.
           carried: emptyBag(),
@@ -461,26 +536,115 @@ export const useGame = create<State & Actions>()(
         return true;
       },
 
-      claimRound: () => {
+      claimRound: (friendHeld = false) => {
         const s = get();
-        if (s.roundGold <= 0) return null;
-        const result = settleRound(s.pool, s.roundGold, s.fieldGold);
+        // A round with no gold of yours still closes if your locks are waiting to age and farm.
+        if (s.roundGold <= 0 && s.locks.length === 0) return null;
+        // The pool pays a delver at most MAX_ROUND_RETURN times what they put into descents this round.
+        const result = settleRound(s.pool, s.roundGold, s.fieldGold, MAX_ROUND_RETURN * s.roundSpent);
         const settled = applyClaim(s, result);
         const percent = Math.round(result.share * 10_000) / 100;
+        // The lock pool is shared by passive gold, apart from the pool descents compete for.
+        const lockResult = settleLocks(s.locks, s.round, s.locked, s.fieldLockGold, l => l.kind !== "friend" || friendHeld);
+        const farmed = round2(Object.values(lockResult.payouts).reduce((a, b) => a + b, 0));
+        const log: LedgerEntry[] = [];
+        if (farmed > 0) log.push(note("payout", `Round ${s.round}: your locks farmed ${farmed} RF (paid when they mature)`, farmed));
+        if (s.roundGold > 0) {
+          log.push({
+            at: Date.now(), kind: "payout" as const,
+            label: `Round ${s.round}: ${percent}% of the gold`, amount: result.payout, burned: 0, pooled: -result.payout, raffle: 0,
+          });
+        }
         set({
           rf: settled.rf, returned: settled.returned,
           // A new round opens with a simulated crowd already in it.
-          pool: Math.round((settled.pool + ROUND_SEED_POOL) * 100) / 100,
+          pool: round2(settled.pool + ROUND_SEED_POOL),
+          locked: round2(lockResult.carry + ROUND_SEED_LOCKED),
           fieldGold: ROUND_SEED_GOLD,
+          fieldLockGold: FIELD_LOCK_GOLD,
+          locks: lockResult.locks,
+          tickets: s.tickets + lockResult.tickets,
           roundGold: 0,
+          roundSpent: 0,
           round: s.round + 1,
           stats: { ...s.stats, bestPayout: Math.max(s.stats.bestPayout, result.payout) },
-          log: [{
-            at: Date.now(), kind: "payout" as const,
-            label: `Round ${s.round}: ${percent}% of the gold`, amount: result.payout, burned: 0, pooled: -result.payout, raffle: 0,
-          }, ...s.log].slice(0, 60),
+          log: [...log.reverse(), ...s.log].slice(0, 60),
         });
-        return { ...result, round: s.round };
+        return { ...result, round: s.round, farmed, lockTickets: lockResult.tickets };
+      },
+
+      lockHero: id => {
+        const s = get();
+        const hero = s.heroes.find(h => h.id === id);
+        if (!hero) throw new LockError("That Delver is not in your collection");
+        const key = heroLockKey(id);
+        if (s.locks.some(l => l.key === key)) return;
+        const lock: Lock = { key, kind: "hero", since: s.round, value: heroLockValue(hero), farmed: 0, dust: 0 };
+        set({ locks: [...s.locks, lock], log: [note("payout", `Locked ${lockName(lock, s.heroes)}`, 0), ...s.log].slice(0, 60) });
+      },
+
+      lockFriend: () => {
+        const s = get();
+        if (s.locks.some(l => l.key === FRIEND_LOCK_KEY)) return;
+        const lock: Lock = { key: FRIEND_LOCK_KEY, kind: "friend", since: s.round, value: FRIEND_LOCK_VALUE, farmed: 0, dust: 0 };
+        set({ locks: [...s.locks, lock], log: [note("payout", "Locked your Rare Friend", 0), ...s.log].slice(0, 60) });
+      },
+
+      stakeRf: amount => {
+        const s = get();
+        let lock: Lock;
+        try {
+          lock = addToStake(s.locks.find(l => l.key === STAKE_LOCK_KEY), amount, s.round);
+        } catch (e) {
+          throw new LockError(e instanceof Error ? e.message : "That stake is not allowed");
+        }
+        if (amount > s.rf + 1e-9) throw new InsufficientFunds("Not enough RF to stake");
+        set({
+          rf: round2(s.rf - amount),
+          locks: [...s.locks.filter(l => l.key !== STAKE_LOCK_KEY), lock],
+          log: [note("spend", `Staked ${amount} RF (${lock.value} in total, yours to take back)`, amount), ...s.log].slice(0, 60),
+        });
+      },
+
+      unlock: key => {
+        const s = get();
+        const lock = s.locks.find(l => l.key === key);
+        if (!lock) throw new LockError("That lock does not exist");
+        const terms = exitTerms(lock, s.round);
+        // An NFT is never moved, so its fee comes out of your balance; a stake pays the fee out of what it returns.
+        if (lock.kind !== "stake" && terms.fee > s.rf + 1e-9) throw new InsufficientFunds(`Not enough RF for the ${terms.fee} RF exit fee`);
+        const gained = round2(terms.payout + terms.stakeBack - (lock.kind === "stake" ? 0 : terms.fee));
+        const burned = applyBurn(s, terms.fee);
+        set({
+          rf: round2(s.rf + gained),
+          burned: burned.burned, spent: burned.spent,
+          returned: round2(s.returned + terms.payout),
+          // What an early leaver gives up goes back to the delvers who stay.
+          locked: round2(s.locked + terms.forfeit),
+          locks: s.locks.filter(l => l.key !== key),
+          log: [
+            note(terms.early ? "spend" : "payout", `${terms.early ? "Broke" : "Released"} ${lockName(lock, s.heroes)}${terms.early ? `: ${terms.forfeit} RF forfeited, ${terms.fee} RF burned` : ""}`,
+              terms.early ? terms.fee : gained, terms.fee),
+            ...s.log,
+          ].slice(0, 60),
+        });
+        return terms;
+      },
+
+      harvest: key => {
+        const s = get();
+        const lock = s.locks.find(l => l.key === key);
+        if (!lock) throw new LockError("That lock does not exist");
+        if (!isMature(lock, s.round)) throw new LockError("Farmed RF can be harvested once the lock is mature");
+        const amount = lock.farmed;
+        if (amount <= 0) return 0;
+        set({
+          rf: round2(s.rf + amount),
+          returned: round2(s.returned + amount),
+          locks: s.locks.map(l => l.key === key ? { ...l, farmed: 0 } : l),
+          log: [note("payout", `Harvested ${lockName(lock, s.heroes)}`, amount), ...s.log].slice(0, 60),
+        });
+        return amount;
       },
 
       faucet: () => {
@@ -497,9 +661,11 @@ export const useGame = create<State & Actions>()(
         set({
           raffle: Math.round((s.raffle + week.treasury) * 100) / 100,
           pool: Math.round((s.pool + week.pooled) * 100) / 100,
+          locked: round2(s.locked + week.locked),
           fieldGold: s.fieldGold + week.gold,
+          fieldLockGold: s.fieldLockGold + week.lockGold,
           fieldTickets: s.fieldTickets + week.tickets,
-          log: [{ at: Date.now(), kind: "spend" as const, label: "Other delvers this week (simulated)", amount: week.spent, burned: 0, pooled: week.pooled, raffle: week.treasury }, ...s.log].slice(0, 60),
+          log: [{ at: Date.now(), kind: "spend" as const, label: "Other delvers this week (simulated)", amount: week.spent, burned: 0, pooled: week.pooled, raffle: week.treasury, locked: week.locked }, ...s.log].slice(0, 60),
         });
       },
 
@@ -546,7 +712,7 @@ export const useGame = create<State & Actions>()(
     }),
     {
       name: "emberdeep-save-v1",
-      version: 4,
+      version: 6,
       merge: mergeSavedState,
       migrate: migrateSavedState,
     },
@@ -572,25 +738,33 @@ export type FriendContext = {
   family: number | null;
 };
 
-/** Perks for the chosen hero, plus the Rare Friend blessing when the wallet holds one. */
-export function computePerks(state: Pick<State, "hero" | "heroes" | "prizes">, friend: FriendContext): Perks {
+/**
+ * Perks for the chosen hero, plus the Rare Friend blessing when the wallet holds one. Everything you only hold
+ * works at HOLD_FACTOR of its strength; locking it (and waiting) makes it stronger. Staked RF adds gold.
+ */
+export function computePerks(state: Pick<State, "hero" | "heroes" | "prizes" | "locks" | "round">, friend: FriendContext): Perks {
+  const lockOf = (key: string) => state.locks.find(l => l.key === key);
+  // A Friend lock only counts while the wallet still holds a Friend.
+  const friendStrength = strength(friend.hasFriend ? lockOf(FRIEND_LOCK_KEY) : undefined, state.round);
   const parts: Partial<Perks>[] = [];
-  if (friend.hasFriend) parts.push(FRIEND_BLESSING);
+  if (friend.hasFriend) parts.push(scalePerks(FRIEND_BLESSING, friendStrength));
   if (state.hero.kind === "nft") {
     const id = state.hero.id;
     const hero = state.heroes.find(h => h.id === id);
-    if (hero) parts.push(heroPerks(hero));
+    if (hero) parts.push(scalePerks(heroPerks(hero), strength(lockOf(heroLockKey(hero.id)), state.round)));
   } else if (state.hero.kind === "friend" && friend.family !== null) {
-    parts.push(FAMILY_PERKS[friend.family]?.perk ?? {});
+    parts.push(scalePerks(FAMILY_PERKS[friend.family]?.perk ?? {}, friendStrength));
   } else if (state.hero.kind === "prize") {
     const serial = state.hero.serial;
     const prize = state.prizes.find(p => p.serial === serial);
-    if (prize) parts.push(FAMILY_PERKS[prize.family]?.perk ?? {});
+    if (prize) parts.push(scalePerks(FAMILY_PERKS[prize.family]?.perk ?? {}, HOLD_FACTOR));
   }
+  const stake = stakeGoldPct(lockOf(STAKE_LOCK_KEY), state.round);
+  if (stake > 0) parts.push({ goldPct: stake });
   return mergePerks(...parts);
 }
 
-export function computeRunPerks(state: Pick<State, "hero" | "heroes" | "prizes" | "weapon" | "armor">, friend: FriendContext): Perks {
+export function computeRunPerks(state: Pick<State, "hero" | "heroes" | "prizes" | "locks" | "round" | "weapon" | "armor">, friend: FriendContext): Perks {
   return mergePerks(
     computePerks(state, friend),
     { lightOnKill: WEAPONS[state.weapon].lightOnKill },

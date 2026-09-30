@@ -1,4 +1,4 @@
-import { FLASK_PRICE, KEY_PRICE, POOL_SHARE } from "./config";
+import { ACTIVE_SHARE, FLASK_PRICE, KEY_PRICE, MAX_ROUND_RETURN } from "./config";
 import { NO_PERKS, WEAPONS, mergePerks, type Perks } from "./catalog";
 import { dimlingDistance, distances, idx, isFloor, visibleSet, type Point } from "./dungeon";
 import { settleRound } from "./economy";
@@ -182,15 +182,18 @@ export type Cohort = { name: string; perks: Perks; flasks: number; share: number
 export type RoundSim = {
   /** Pool paid out divided by RF spent, per cohort. Nothing here is a promised rate. */
   rtp: Record<string, number>;
-  /** Everything paid out divided by everything spent. */
+  /** Everything paid out divided by everything spent, after the return cap. */
   overall: number;
+  /** What the return cap held back, divided by everything spent. It stays in the pool for the next round. */
+  withheld: number;
   /** Each cohort's part of all banked gold, which is also its part of the pool. */
   goldShare: Record<string, number>;
 };
 
 /**
- * Plays many descents by a mixed crowd, pools 67% of what they all spend and splits it by banked
- * gold, exactly as a closed round does. Loot never depends on the pool, so each cohort's runs are
+ * Plays many descents by a mixed crowd, pools 60% of what they all spend (the gold-share round pool;
+ * another 7% goes to the lock pool, which descents never touch) and splits it by banked gold,
+ * exactly as a closed round does. Loot never depends on the pool, so each cohort's runs are
  * played once and recycled. Bots rarely die, so returns here are an upper bound for skilled play.
  */
 export function simulateRound(cohorts: Cohort[], runs = 2_000, samples = 30): RoundSim {
@@ -211,17 +214,18 @@ export function simulateRound(cohorts: Cohort[], runs = 2_000, samples = 30): Ro
   }
   const totalSpent = spent.reduce((a, b) => a + b, 0);
   const totalGold = gold.reduce((a, b) => a + b, 0);
-  const pool = totalSpent * POOL_SHARE;
+  const pool = totalSpent * ACTIVE_SHARE;
   const rtp: Record<string, number> = {}, goldShare: Record<string, number> = {};
-  let paid = 0;
+  let paid = 0, withheld = 0;
   cohorts.forEach((c, i) => {
-    // Settle each cohort as one delver holding its gold against everyone else's.
-    const payout = settleRound(pool, gold[i], totalGold - gold[i]).payout;
-    paid += payout;
-    rtp[c.name] = payout / spent[i];
+    // Settle each cohort as one delver holding its gold against everyone else's, with the same return cap.
+    const s = settleRound(pool, gold[i], totalGold - gold[i], MAX_ROUND_RETURN * spent[i]);
+    paid += s.payout;
+    withheld += s.withheld;
+    rtp[c.name] = s.payout / spent[i];
     goldShare[c.name] = totalGold > 0 ? gold[i] / totalGold : 0;
   });
-  return { rtp, overall: paid / totalSpent, goldShare };
+  return { rtp, overall: paid / totalSpent, withheld: withheld / totalSpent, goldShare };
 }
 
 export function simulateFogMany(runs: number, flasks = 1, perks: Perks = NO_PERKS, greed = 1.6) {

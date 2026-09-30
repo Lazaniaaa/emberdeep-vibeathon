@@ -87,7 +87,7 @@ export function RaffleTab() {
         <CardHeader>
           <CardTitle className="font-pixel">Weekly pass</CardTitle>
           <CardDescription>
-            A pass lasts until this week's draw. It raises the drop rate. It never hands you a ticket, and the same 25/8/67 split applies to the price. Free rate is {Math.round(TICKET_DROP_CHANCE * 1000) / 10}%.
+            A pass lasts until this week's draw. It raises the drop rate. It never hands you a ticket, and the same 25/8/7/60 split applies to the price. Free rate is {Math.round(TICKET_DROP_CHANCE * 1000) / 10}%.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-2 sm:grid-cols-2">

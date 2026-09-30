@@ -1,4 +1,4 @@
-import { HP_SCALE } from "./config";
+import { HOLD_FACTOR, HP_SCALE } from "./config";
 
 export type Rarity = "common" | "rare" | "epic" | "legendary";
 
@@ -32,7 +32,7 @@ export const NO_PERKS: Perks = {
 };
 
 /** A step discount acts like extra light, and extra light multiplies the gold banked. Stacking is capped. */
-export const MAX_STEP_DISCOUNT = 0.45;
+export const MAX_STEP_DISCOUNT = 0.4;
 
 export function mergePerks(...list: Partial<Perks>[]): Perks {
   const out: Perks = { ...NO_PERKS };
@@ -51,6 +51,47 @@ export function mergePerks(...list: Partial<Perks>[]): Perks {
     out.lightOnKill += p.lightOnKill ?? 0;
   }
   return out;
+}
+
+const cents = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * Scales a perk by a strength factor: HOLD_FACTOR for a perk you only hold, more for one you lock.
+ * Counts round to whole numbers, light radius rounds down (a fraction of a tile is no tile), and a
+ * regrowth interval gets shorter as the perk gets stronger. Stealth is on or off, so it is not scaled.
+ */
+export function scalePerks(p: Partial<Perks>, k: number): Partial<Perks> {
+  const out: Partial<Perks> = {};
+  if (p.goldPct) out.goldPct = Math.round(p.goldPct * k);
+  if (p.crystalPct) out.crystalPct = Math.round(p.crystalPct * k);
+  if (p.findPct) out.findPct = Math.round(p.findPct * k);
+  if (p.startLight) out.startLight = Math.round(p.startLight * k);
+  if (p.damage) out.damage = Math.round(p.damage * k);
+  if (p.stepDiscount) out.stepDiscount = cents(p.stepDiscount * k);
+  if (p.drainReduce) out.drainReduce = cents(p.drainReduce * k);
+  if (p.freeStepChance) out.freeStepChance = cents(p.freeStepChance * k);
+  if (p.radius) out.radius = Math.floor(p.radius * k + 1e-9);
+  if (p.regenEvery) out.regenEvery = Math.max(1, Math.round(p.regenEvery / k));
+  if (p.lightOnKill) out.lightOnKill = p.lightOnKill;
+  if (p.stealth) out.stealth = true;
+  return out;
+}
+
+/** The effect of a set of perks in plain words. */
+export function describePerks(p: Partial<Perks>): string {
+  const out: string[] = [];
+  if (p.goldPct) out.push(`+${p.goldPct}% gold`);
+  if (p.crystalPct) out.push(`+${p.crystalPct}% crystals`);
+  if (p.startLight) out.push(`+${p.startLight} starting light`);
+  if (p.stepDiscount) out.push(`-${Math.round(p.stepDiscount * 100)}% light per step`);
+  if (p.damage) out.push(`+${p.damage} weapon damage`);
+  if (p.findPct) out.push(`+${p.findPct}% chests and vaults`);
+  if (p.radius) out.push(`+${p.radius} light radius`);
+  if (p.drainReduce) out.push(`dimlings drain ${Math.round(p.drainReduce * 100)}% less`);
+  if (p.regenEvery) out.push(`+1 light every ${p.regenEvery} steps`);
+  if (p.freeStepChance) out.push(`${Math.round(p.freeStepChance * 100)}% of steps are free`);
+  if (p.stealth) out.push("dimlings wake only up close");
+  return out.length > 0 ? out.join(", ") : "no effect yet";
 }
 
 export type ClassId = "prospector" | "seer" | "lamplighter" | "pathfinder" | "duelist" | "scavenger";
@@ -120,10 +161,14 @@ export function heroPerks(hero: HeroNft): Partial<Perks> {
   return hero.rarity === "legendary" ? mergePerks(base, LEGENDARY_BONUS) : base;
 }
 
-export function heroPerkText(hero: HeroNft) {
-  const tier = RARITY_INFO[hero.rarity].tier;
-  const text = CLASSES[hero.classId].describe(tier);
-  return hero.rarity === "legendary" ? `${text}, +1 light radius` : text;
+/** What a Delver's perk does at strength `k`. The default is a Delver you only hold. */
+export function heroPerkText(hero: HeroNft, k = HOLD_FACTOR) {
+  return describePerks(scalePerks(heroPerks(hero), k));
+}
+
+/** What a class does at strength `k` for a given rarity tier, for the mint cards. */
+export function classPerkText(classId: ClassId, tier: number, k = HOLD_FACTOR) {
+  return describePerks(scalePerks(CLASSES[classId].perk(tier), k));
 }
 
 export type WeaponId = "fists" | "dagger" | "sword" | "emberblade";
@@ -179,18 +224,28 @@ export const ARMORS: Record<ArmorId, ArmorDef> = {
 export const ARMOR_IDS = Object.keys(ARMORS) as ArmorId[];
 
 /** On-chain Generations families, in registry order. Each one gets a signature perk. */
-export const FAMILY_PERKS: readonly { name: string; perk: Partial<Perks>; text: string }[] = [
-  { name: "Skeleton", perk: { drainReduce: 0.5 }, text: "Dimlings drain 50% less. They think you're one of them." },
-  { name: "Mask", perk: { stealth: true }, text: "Dimlings don't notice you until they're next to you." },
-  { name: "Family", perk: { goldPct: 25 }, text: "+25% gold. Shared with the whole family, of course." },
-  { name: "Cellular", perk: { regenEvery: 8 }, text: "Regrows 1 light every 8 steps." },
-  { name: "Asymmetry", perk: { freeStepChance: 0.2 }, text: "20% of steps cost no light at all." },
-  { name: "Hoverer", perk: { stepDiscount: 0.25 }, text: "Floats over the floor: -25% light per step." },
-  { name: "Colossus", perk: { damage: 2 * HP_SCALE }, text: `+${2 * HP_SCALE} damage. Dimlings are very small.` },
-  { name: "Sparkling", perk: { radius: 2 }, text: "+2 light radius. Glitters in the deep." },
-  { name: "Hollow", perk: { crystalPct: 40 }, text: "+40% crystals. Something inside resonates." },
+export const FAMILY_PERKS: readonly { name: string; perk: Partial<Perks>; flavor: string }[] = [
+  { name: "Skeleton", perk: { drainReduce: 0.5 }, flavor: "They think you're one of them." },
+  { name: "Mask", perk: { stealth: true }, flavor: "Faceless in the dark." },
+  { name: "Family", perk: { goldPct: 25 }, flavor: "Shared with the whole family, of course." },
+  { name: "Cellular", perk: { regenEvery: 8 }, flavor: "Grows back, slowly." },
+  { name: "Asymmetry", perk: { freeStepChance: 0.2 }, flavor: "Nothing lands where you expect." },
+  { name: "Hoverer", perk: { stepDiscount: 0.25 }, flavor: "Floats over the floor." },
+  { name: "Colossus", perk: { damage: 2 * HP_SCALE }, flavor: "Dimlings are very small." },
+  { name: "Sparkling", perk: { radius: 2 }, flavor: "Glitters in the deep." },
+  { name: "Hollow", perk: { crystalPct: 40 }, flavor: "Something inside resonates." },
 ];
 
-/** Passive bonus for any wallet that holds a hardwired Rare Friend (generation ≥ 1). */
+/** A Friend family's perk at strength `k`, with its flavour line. The default is a Friend you only hold. */
+export function familyPerkText(family: number, k = HOLD_FACTOR) {
+  const f = FAMILY_PERKS[family];
+  return f ? `${describePerks(scalePerks(f.perk, k))}. ${f.flavor}` : "Family perk";
+}
+
+/** Passive bonus for any wallet that holds a hardwired Rare Friend (generation ≥ 1), at full strength. */
 export const FRIEND_BLESSING: Partial<Perks> = { goldPct: 20, radius: 1 };
-export const FRIEND_BLESSING_TEXT = "+20% gold and +1 light radius on every descent";
+
+/** The blessing at strength `k`. The default is a Friend you only hold. */
+export function blessingText(k = HOLD_FACTOR) {
+  return describePerks(scalePerks(FRIEND_BLESSING, k));
+}

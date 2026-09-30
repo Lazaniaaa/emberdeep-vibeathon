@@ -10,7 +10,12 @@ export const RF_USD = 0.01;
  */
 export const BURN_SHARE = 0.25;
 export const RAFFLE_SHARE = 0.08;
+/** What goes back to players in total: the gold-share round pool plus the lock pool. */
 export const POOL_SHARE = 0.67;
+/** The part of it reserved for locked NFTs and RF. Shared by passive gold, never by descents. */
+export const LOCK_SHARE = 0.07;
+/** The gold-share round pool: POOL_SHARE minus LOCK_SHARE. */
+export const ACTIVE_SHARE = 0.6;
 
 export const START_BALANCE = 2_000;
 /** Simulated RF already burned by the wider community before this session. */
@@ -31,17 +36,31 @@ export const KEY_PRICE = 50;
 export const START_KEYS = 3;
 export const MAX_KEYS = 20;
 
-// Rewards are a share of the round's pool, never a fixed rate per gold. The pool is 67% of every RF
-// spent in the round. Gold is only earned by extracting alive, and when the round closes each delver
-// receives (their gold / all gold) of the pool, so nothing in the game promises an amount of RF.
+// Rewards are a share of the round's pool, never a fixed rate per gold. The pool is 60% of every RF
+// spent in the round (ACTIVE_SHARE; another 7% feeds the lock pool). Gold is only earned by extracting
+// alive, and when the round closes each delver receives (their gold / all gold) of the pool, so nothing
+// in the game promises an amount of RF.
 
 /** One click of "other delvers this week": their spend. It feeds the raffle treasury and the round pool. */
 export const FIELD_WEEK_SPEND = 20_000;
-/** Simulated crowd: gold banked per RF they spend (deaths and mistakes already included). */
-export const FIELD_GOLD_PER_RF = 1.4;
+/**
+ * Simulated crowd: gold banked per RF they spend. 2.3 is what the simulated 70/20/10 crowd of unperked,
+ * blessed and top-build delvers banks on average, so a lone delver in the demo is measured against a crowd
+ * that includes players with good gear. The bots it comes from rarely die, so real players may bank less.
+ */
+export const FIELD_GOLD_PER_RF = 2.3;
+/**
+ * The most a delver takes back from the round pool, as a multiple of what they put into descents that round
+ * (entry keys plus oil): +60% at the very best. Whatever the cap withholds stays in the pool for the next round.
+ */
+export const MAX_ROUND_RETURN = 1.6;
 /** Every round opens with one simulated crowd week already in it, so a share is never trivially 100%. */
-export const ROUND_SEED_POOL = FIELD_WEEK_SPEND * POOL_SHARE;
+export const ROUND_SEED_POOL = FIELD_WEEK_SPEND * ACTIVE_SHARE;
 export const ROUND_SEED_GOLD = FIELD_WEEK_SPEND * FIELD_GOLD_PER_RF;
+/** The same crowd week also fills the lock pool and brings its own lockers. */
+export const ROUND_SEED_LOCKED = FIELD_WEEK_SPEND * LOCK_SHARE;
+/** Passive gold the simulated crowd's lockers farm in a crowd week. An assumption, like FIELD_GOLD_PER_RF. */
+export const FIELD_LOCK_GOLD = 16_000;
 
 export const MAP_W = 27;
 export const MAP_H = 17;
@@ -102,6 +121,33 @@ export const RAGE_MULT = 1.8;
 export const REGEN_TURNS = 5;
 /** Healing Draught: found in the deep, never sold. */
 export const HEAL_LIGHT = 60;
+
+// ---------------------------------------------------------------- locks
+// A perk you merely hold works at HOLD_FACTOR of its full strength. Locking a Delver, your wallet's Friend
+// or RF starts at LOCK_START and grows by LOCK_STEP for every round closed since, up to LOCK_MAX. The clock
+// is closed rounds: the Vault's button in the demo, a schedule in production.
+
+export const HOLD_FACTOR = 0.6;
+export const LOCK_START = 0.8;
+export const LOCK_STEP = 0.05;
+export const LOCK_MAX = 1.3;
+/** Closed rounds until a lock is mature: farmed RF can be harvested and it can be released for free. */
+export const MATURITY_ROUNDS = 4;
+/** Leaving a lock early forfeits this share of what it has farmed (it goes back to the lock pool)... */
+export const EXIT_FORFEIT = 0.5;
+/** ...and burns this share of the lock's value: an NFT's mint price, a Friend's floor ask, or the stake. */
+export const EXIT_BURN = 0.1;
+/** Passive gold a lock farms per round per RF of value (before the tenure factor). It sets its share of the lock pool. */
+export const LOCK_GOLD_PER_RF = 0.1;
+/** Most RF one wallet can stake, and the smallest step to add. */
+export const STAKE_MAX = 5_000;
+export const STAKE_STEP = 500;
+/** Staked RF adds this much gold per STAKE_STEP locked, up to the cap (both before the tenure factor). */
+export const STAKE_GOLD_PER_STEP = 1;
+export const STAKE_GOLD_CAP = 8;
+/** NFT locks (Delvers and the wallet Friend) earn this fraction of a raffle ticket per round, for the first few locks only. */
+export const LOCK_TICKET_DUST = 0.25;
+export const LOCK_TICKET_LOCKS = 2;
 
 /** Chance that a Sealed Vault holds a Soul Sigil (a free character mint). */
 export const SIGIL_DROP_CHANCE = 0.3;

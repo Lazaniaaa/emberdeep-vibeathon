@@ -1,6 +1,6 @@
 import { Flame } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { BURN_SHARE, KEY_PRICE, POOL_SHARE, RAFFLE_SHARE, FLASK_PRICE } from "@/game/config";
+import { ACTIVE_SHARE, BURN_SHARE, FLASK_PRICE, KEY_PRICE, LOCK_MAX, LOCK_SHARE, MATURITY_ROUNDS, MAX_ROUND_RETURN, RAFFLE_SHARE } from "@/game/config";
 import { roundShare } from "@/game/economy";
 import { percent, rf } from "@/lib/format";
 import { useGame } from "@/state/store";
@@ -20,7 +20,11 @@ const STEPS = [
   },
   {
     title: "Share the pool",
-    text: `Gold you bring home counts toward the round. When it closes, you take the same percentage of the pool as your percentage of the gold. ${Math.round(POOL_SHARE * 100)}% of every RF spent feeds the pool, ${Math.round(BURN_SHARE * 100)}% is burned and ${Math.round(RAFFLE_SHARE * 100)}% buys the weekly Friend lot.`,
+    text: `Gold you bring home counts toward the round. When it closes, you take the same percentage of the pool as your percentage of the gold, up to ${Math.round(MAX_ROUND_RETURN * 100)}% of what you put into descents that round. ${Math.round(ACTIVE_SHARE * 100)}% of every RF spent feeds the pool, ${Math.round(LOCK_SHARE * 100)}% the lock pool, ${Math.round(BURN_SHARE * 100)}% is burned and ${Math.round(RAFFLE_SHARE * 100)}% buys the weekly Friend lot.`,
+  },
+  {
+    title: "Lock to grow",
+    text: `Perks you only hold work at reduced strength. Lock a Delver, your Rare Friend or some RF at the Ember Altar and its perk grows with every round closed, up to ${Math.round(LOCK_MAX * 100)}%. Locks also farm a share of the lock pool, paid once they mature after ${MATURITY_ROUNDS} rounds. Everything here is simulated.`,
   },
 ];
 

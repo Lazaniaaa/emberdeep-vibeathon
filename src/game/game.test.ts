@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  BOSS_DEPTH, BOSS_DRAIN, BOSS_HP, BOSS_SIZE, BURN_SHARE, HOARD_CRYSTALS, HOARD_GOLD, HOARD_SIGIL_CHANCE, HP_SCALE, FLASK_LIGHT, HEAL_LIGHT, KEY_PRICE, NIGHT_VISION_STEPS, POOL_SHARE, RAFFLE_SHARE,
+  BOSS_DEPTH, BOSS_DRAIN, BOSS_HP, BOSS_SIZE, BURN_SHARE, HOARD_CRYSTALS, HOARD_GOLD, HOARD_SIGIL_CHANCE, HP_SCALE, FLASK_LIGHT, HEAL_LIGHT, KEY_PRICE, LOCK_SHARE, NIGHT_VISION_STEPS, POOL_SHARE, RAFFLE_SHARE, ACTIVE_SHARE,
   RAGE_HITS, RAGE_MULT, REGEN_TURNS,
-  FIELD_GOLD_PER_RF, ROUND_SEED_GOLD, ROUND_SEED_POOL, stepCost,
+  FIELD_GOLD_PER_RF, FLASK_PRICE, HOLD_FACTOR, MAX_ROUND_RETURN, ROUND_SEED_GOLD, ROUND_SEED_LOCKED, ROUND_SEED_POOL, stepCost,
 } from "./config";
-import { MAX_STEP_DISCOUNT, NO_PERKS, POTIONS, POTION_DROP_WEIGHTS, SHOP_POTION_IDS, mergePerks } from "./catalog";
+import { FRIEND_BLESSING, MAX_STEP_DISCOUNT, NO_PERKS, POTIONS, POTION_DROP_WEIGHTS, SHOP_POTION_IDS, mergePerks, scalePerks } from "./catalog";
 import { dimlingDistance, distances, footprint, generateFloor, idx, themeForDepth, type Dimling } from "./dungeon";
 import { applyClaim, applySpend, roundShare, settleRound, splitSpend } from "./economy";
 import { drawWeek, lotSize, passCost, ticketChance, ticketsKept } from "./raffle";
@@ -12,19 +12,30 @@ import { createRng } from "./rng";
 import { applyAction, bossAlive, emptyBag, onStairs, startRun, type RunState } from "./run";
 import { simulateFogMany, simulateMany, simulateRound, type Cohort } from "./sim";
 
-const ledger = { rf: 1_000, pool: ROUND_SEED_POOL, raffle: 0, burned: 0, spent: 0, returned: 0 };
+const ledger = { rf: 1_000, pool: ROUND_SEED_POOL, locked: ROUND_SEED_LOCKED, raffle: 0, burned: 0, spent: 0, returned: 0 };
 
 describe("economy", () => {
   it("burns exactly the configured share of every spend and pools the rest", () => {
-    const { burned, raffle, pooled } = splitSpend(100);
+    const { burned, raffle, locked, pooled } = splitSpend(100);
     expect(burned).toBe(100 * BURN_SHARE);
     expect(raffle).toBe(100 * RAFFLE_SHARE);
-    expect(burned + raffle + pooled).toBe(100);
+    expect(locked).toBeCloseTo(100 * LOCK_SHARE, 10);
+    expect(burned + raffle + locked + pooled).toBe(100);
     const after = applySpend(ledger, 100);
     expect(after.rf).toBe(900);
     expect(after.burned).toBe(25);
     expect(after.raffle).toBe(8);
-    expect(after.pool).toBe(ROUND_SEED_POOL + 67);
+    expect(after.locked).toBeCloseTo(ROUND_SEED_LOCKED + 7, 6);
+    expect(after.pool).toBe(ROUND_SEED_POOL + 60);
+  });
+
+  it("keeps 67% for players, split between the round pool and the lock pool", () => {
+    expect(ACTIVE_SHARE + LOCK_SHARE).toBeCloseTo(POOL_SHARE, 10);
+    expect(BURN_SHARE + RAFFLE_SHARE + POOL_SHARE).toBeCloseTo(1, 10);
+    for (const amount of [1, 7, 13.37, 50, 999.99]) {
+      const { burned, raffle, locked, pooled } = splitSpend(amount);
+      expect(burned + raffle + locked + pooled).toBeCloseTo(amount, 2);
+    }
   });
 
   it("refuses to spend more than the balance", () => {
@@ -63,6 +74,22 @@ describe("economy", () => {
     expect(applyClaim({ ...ledger, pool: 5_000 }, s).pool).toBe(5_000);
   });
 
+  it("caps what a delver takes back at a multiple of what they put in, and leaves the rest in the pool", () => {
+    // 90% of the gold would be 9,000 RF, but only 100 RF went into descents.
+    const s = settleRound(10_000, 900, 100, MAX_ROUND_RETURN * 100);
+    expect(s.payout).toBe(MAX_ROUND_RETURN * 100);
+    expect(s.withheld).toBe(9_000 - s.payout);
+    expect(s.carry).toBeCloseTo(s.withheld, 2);
+    expect(s.payout + s.fieldPayout + s.carry).toBeCloseTo(10_000, 6);
+    // Under the cap nothing changes.
+    const under = settleRound(10_000, 10, 990, 5_000);
+    expect(under).toEqual(settleRound(10_000, 10, 990));
+    expect(under.withheld).toBe(0);
+    // No cap given means no cap.
+    expect(settleRound(10_000, 900, 100).payout).toBe(9_000);
+    expect(settleRound(10_000, 900, 100, 0).payout).toBe(0);
+  });
+
   it("moves a claimed payout out of the pool and into the balance", () => {
     const s = settleRound(2_000, 50, 150);
     const after = applyClaim({ ...ledger, pool: 2_000 }, s);
@@ -73,7 +100,8 @@ describe("economy", () => {
   });
 
   it("opens each round with a simulated crowd worth one crowd week", () => {
-    expect(ROUND_SEED_POOL).toBeCloseTo(20_000 * POOL_SHARE);
+    expect(ROUND_SEED_POOL).toBeCloseTo(20_000 * ACTIVE_SHARE);
+    expect(ROUND_SEED_LOCKED).toBeCloseTo(20_000 * LOCK_SHARE);
     expect(ROUND_SEED_GOLD).toBeGreaterThan(0);
   });
 });
@@ -539,12 +567,27 @@ describe("balance", () => {
     expect(strong.stepDiscount).toBe(MAX_STEP_DISCOUNT);
   });
 
-  it("keeps the simulated crowd below what a perfect bot banks, but not absurdly far below", { timeout: 60_000 }, () => {
+  it("keeps the two bots close, so the fog bot is a fair stand-in for the perfect one", { timeout: 60_000 }, () => {
     const omni = simulateMany(40, 2).goldPerRf;
     const fog = simulateFogMany(40, 2).goldPerRf;
     expect(Math.abs(omni - fog) / omni).toBeLessThan(0.15);
-    expect(FIELD_GOLD_PER_RF).toBeLessThan(fog);
-    expect(FIELD_GOLD_PER_RF).toBeGreaterThan(fog * 0.4);
+  });
+
+  it("sets the simulated crowd's rate at the average of the mixed crowd the simulation uses", { timeout: 120_000 }, () => {
+    // 70% unperked, 20% holding a Friend's blessing, 10% holding the strongest build, all only holding their perks.
+    const held = (p: Parameters<typeof scalePerks>[0]) => scalePerks(p, HOLD_FACTOR);
+    const mix = [
+      { share: 70, flasks: 2, perks: NO_PERKS },
+      { share: 20, flasks: 2, perks: mergePerks(held(FRIEND_BLESSING)) },
+      { share: 10, flasks: 3, perks: mergePerks(held({ stepDiscount: 0.35 }), held({ radius: 1 }), held({ stepDiscount: 0.25 }), held(FRIEND_BLESSING)) },
+    ];
+    let gold = 0, spent = 0;
+    for (const m of mix) {
+      const cost = m.flasks * FLASK_PRICE + KEY_PRICE;
+      gold += m.share * cost * simulateFogMany(40, m.flasks, m.perks).goldPerRf;
+      spent += m.share * cost;
+    }
+    expect(Math.abs(gold / spent - FIELD_GOLD_PER_RF) / FIELD_GOLD_PER_RF).toBeLessThan(0.1);
   });
 
   it("makes a key a fixed cost of every descent, so a single flask does not pay for itself", { timeout: 60_000 }, () => {
@@ -568,8 +611,9 @@ describe("balance", () => {
       { name: "strong", perks: strong, flasks: 3, share: 10 },
     ];
     const sim = simulateRound(cohorts, 2_000, 20);
-    // Paid out / spent is the pool share by construction: the round hands out all of it and nothing more.
-    expect(sim.overall).toBeCloseTo(POOL_SHARE, 2);
+    // Paid out plus what the return cap held back is the round pool's share by construction: nothing more is handed out.
+    expect(sim.overall + sim.withheld).toBeCloseTo(ACTIVE_SHARE, 2);
+    for (const r of Object.values(sim.rtp)) expect(r).toBeLessThanOrEqual(MAX_ROUND_RETURN + 1e-9);
     expect(Object.values(sim.goldShare).reduce((a, b) => a + b, 0)).toBeCloseTo(1, 6);
     expect(sim.rtp.strong).toBeGreaterThan(sim.rtp.blessed);
     expect(sim.rtp.blessed).toBeGreaterThan(sim.rtp.base);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { computeRunPerks, mergeSavedState, migrateSavedState, useGame } from "./store";
 import { NO_PERKS } from "@/game/catalog";
-import { KEY_PRICE, MAX_KEYS, RARITY_SUPPLY, ROUND_SEED_GOLD, ROUND_SEED_POOL, START_KEYS, WORLD_MINT_SEED } from "@/game/config";
+import { KEY_PRICE, MAX_KEYS, MAX_ROUND_RETURN, RARITY_SUPPLY, ROUND_SEED_GOLD, ROUND_SEED_POOL, START_KEYS, WORLD_MINT_SEED } from "@/game/config";
 import { ARMORS } from "@/game/catalog";
 import { mintsLeft, rollSigilRarity } from "@/game/economy";
 import { applyAction, emptyBag, startRun } from "@/game/run";
@@ -129,7 +129,7 @@ describe("run settlement", () => {
     useGame.getState().reset();
   });
 
-  it("sells keys through the same 25/8/67 split", () => {
+  it("sells keys through the same 25/8/7/60 split", () => {
     useGame.getState().reset();
     const before = useGame.getState();
     useGame.getState().buyKey(2);
@@ -138,7 +138,8 @@ describe("run settlement", () => {
     expect(after.rf).toBe(before.rf - 2 * KEY_PRICE);
     expect(after.burned - before.burned).toBeCloseTo(2 * KEY_PRICE * 0.25);
     expect(after.raffle - before.raffle).toBeCloseTo(2 * KEY_PRICE * 0.08);
-    expect(after.pool - before.pool).toBeCloseTo(2 * KEY_PRICE * 0.67);
+    expect(after.pool - before.pool).toBeCloseTo(2 * KEY_PRICE * 0.6);
+    expect(after.locked - before.locked).toBeCloseTo(2 * KEY_PRICE * 0.07);
     expect(() => useGame.getState().buyKey(MAX_KEYS)).toThrow();
     useGame.getState().reset();
   });
@@ -162,7 +163,7 @@ describe("run settlement", () => {
   it("closes a round by gold share, then opens the next with a fresh crowd", () => {
     useGame.getState().reset();
     expect(useGame.getState().claimRound()).toBeNull();
-    useGame.setState({ pool: 10_000, roundGold: 100, fieldGold: 9_900 });
+    useGame.setState({ pool: 10_000, roundGold: 100, roundSpent: 1_000, fieldGold: 9_900 });
     const rf = useGame.getState().rf;
     const result = useGame.getState().claimRound()!;
     const after = useGame.getState();
@@ -172,9 +173,40 @@ describe("run settlement", () => {
     expect(after.returned).toBe(100);
     expect(after.round).toBe(2);
     expect(after.roundGold).toBe(0);
+    expect(after.roundSpent).toBe(0);
     expect(after.fieldGold).toBe(ROUND_SEED_GOLD);
     expect(after.pool).toBeCloseTo(ROUND_SEED_POOL);
     expect(after.stats.bestPayout).toBe(100);
+    useGame.getState().reset();
+  });
+
+  it("counts every descent's key and oil toward the round's return cap, whether or not the delver made it home", () => {
+    useGame.getState().reset();
+    for (const status of ["extracted", "dead"] as const) {
+      useGame.getState().payForRun();
+      const before = useGame.getState();
+      const run = { ...startRun({ seed: 7, flasks: 2, perks: NO_PERKS, weaponDamage: 1, bag: emptyBag() }), status, gold: 50 };
+      useGame.getState().finishRun(run);
+      expect(useGame.getState().roundSpent).toBeCloseTo(before.roundSpent + KEY_PRICE + before.runSpent, 6);
+    }
+    useGame.getState().payForRun();
+    const beforeAbandon = useGame.getState();
+    useGame.getState().abandonRun();
+    expect(useGame.getState().roundSpent).toBeCloseTo(beforeAbandon.roundSpent + KEY_PRICE + beforeAbandon.runSpent, 6);
+    useGame.getState().reset();
+  });
+
+  it("pays at most the return cap when a round closes, and keeps the rest in the pool for the next round", () => {
+    useGame.getState().reset();
+    useGame.setState({ pool: 10_000, roundGold: 900, roundSpent: 100, fieldGold: 100 });
+    const rf = useGame.getState().rf;
+    const result = useGame.getState().claimRound()!;
+    const after = useGame.getState();
+    expect(result.payout).toBe(MAX_ROUND_RETURN * 100);
+    expect(result.withheld).toBe(9_000 - result.payout);
+    expect(after.rf).toBe(rf + result.payout);
+    expect(after.pool).toBeCloseTo(result.withheld + ROUND_SEED_POOL, 1);
+    expect(after.roundSpent).toBe(0);
     useGame.getState().reset();
   });
 
@@ -185,8 +217,17 @@ describe("run settlement", () => {
     const after = useGame.getState();
     expect(after.pool).toBeGreaterThan(before.pool);
     expect(after.fieldGold).toBeGreaterThan(before.fieldGold);
+    expect(after.locked).toBeGreaterThan(before.locked);
+    expect(after.fieldLockGold).toBeGreaterThan(before.fieldLockGold);
     expect(after.raffle).toBeGreaterThan(before.raffle);
     useGame.getState().reset();
+  });
+
+  it("gives an in-progress round of an older save a cap that does not zero its payout", () => {
+    const mid = migrateSavedState({ rf: 500, roundGold: 240 }, 5) as Record<string, unknown>;
+    expect(mid.roundSpent).toBe(240);
+    const fresh = migrateSavedState({ rf: 500, roundGold: 0 }, 5) as Record<string, unknown>;
+    expect(fresh.roundSpent).toBe(0);
   });
 
   it("resets the meaningless old pool when a pre-round save is migrated", () => {

@@ -1,5 +1,5 @@
 import { friendFrame, type FriendSprite } from "@/chain/friend-sprite";
-import { CLASSES, FAMILY_PERKS, RARITY_INFO, heroPerkText, type HeroNft } from "@/game/catalog";
+import { CLASSES, FAMILY_PERKS, RARITY_INFO, familyPerkText, heroPerkText, type HeroNft } from "@/game/catalog";
 import { heroMask, type Mask } from "@/render/sprites";
 import type { Portrait } from "./art";
 import type { HeroChoice, PrizeFriend } from "@/state/store";
@@ -26,12 +26,13 @@ export const WANDERER: HeroVisual = {
   mask: (_f, walking = false, frame = 0) => heroMask("wanderer", walking ? frame : 0),
 };
 
-export function nftVisual(hero: HeroNft): HeroVisual {
+/** `k` is the strength of the Delver's perk: a held Delver by default, more if it is locked. */
+export function nftVisual(hero: HeroNft, k?: number): HeroVisual {
   const info = RARITY_INFO[hero.rarity];
   return {
     name: `${CLASSES[hero.classId].name} #${hero.serial}`,
     subtitle: `${info.label}${hero.source === "sigil" ? " · Soul Sigil" : ""}`,
-    perk: heroPerkText(hero),
+    perk: heroPerkText(hero, k),
     color: info.color,
     mirrored: true,
     portrait: { kind: hero.classId, rarity: hero.rarity, edition: hero.edition },
@@ -44,19 +45,19 @@ export function prizeVisual(prize: PrizeFriend): HeroVisual {
   return {
     name: `${family?.name ?? "Friend"} #${prize.serial}`,
     subtitle: "Weekly raffle",
-    perk: family?.text ?? "Family perk",
+    perk: familyPerkText(prize.family),
     color: "#FF4FD8",
     mirrored: true,
     mask: (_f, walking = false, frame = 0) => heroMask("wanderer", walking ? frame : 0),
   };
 }
 
-export function friendVisual(id: bigint, sprite: FriendSprite | null): HeroVisual {
+export function friendVisual(id: bigint, sprite: FriendSprite | null, k?: number): HeroVisual {
   const family = sprite ? FAMILY_PERKS[sprite.family] : null;
   return {
     name: `Rare Friend #${id}`,
     subtitle: family ? `${family.name} family` : "Loading artwork…",
-    perk: family?.text ?? "Reading on-chain artwork…",
+    perk: sprite ? familyPerkText(sprite.family, k) : "Reading on-chain artwork…",
     color: "#CCFF00",
     mirrored: false,
     mask: (facing, walking = false, frame = 0) =>

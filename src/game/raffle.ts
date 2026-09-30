@@ -1,6 +1,6 @@
 import {
-  FIELD_EXTRACT_SHARE, FIELD_GOLD_PER_RF, FIELD_ROLLS_PER_RF, FIELD_WEEK_SPEND, FRIEND_ASK_RF, LOT_MAX, LOT_MIN,
-  PASSES, POOL_SHARE, RAFFLE_SHARE, TICKET_DROP_CHANCE, type PassId,
+  ACTIVE_SHARE, FIELD_EXTRACT_SHARE, FIELD_GOLD_PER_RF, FIELD_LOCK_GOLD, FIELD_ROLLS_PER_RF, FIELD_WEEK_SPEND, FRIEND_ASK_RF,
+  LOCK_SHARE, LOT_MAX, LOT_MIN, PASSES, RAFFLE_SHARE, TICKET_DROP_CHANCE, type PassId,
 } from "./config";
 import { int, type Rng, createRng } from "./rng";
 
@@ -53,9 +53,11 @@ export function fieldWeek() {
   return {
     spent: FIELD_WEEK_SPEND,
     treasury: round(FIELD_WEEK_SPEND * RAFFLE_SHARE),
-    /** The crowd's share of the pool and the gold it banked, so its slice of the round grows with its spend. */
-    pooled: round(FIELD_WEEK_SPEND * POOL_SHARE),
+    /** The crowd's share of the pools and the gold it banked, so its slice of the round grows with its spend. */
+    pooled: round(FIELD_WEEK_SPEND * ACTIVE_SHARE),
+    locked: round(FIELD_WEEK_SPEND * LOCK_SHARE),
     gold: Math.round(FIELD_WEEK_SPEND * FIELD_GOLD_PER_RF),
+    lockGold: FIELD_LOCK_GOLD,
     tickets,
   };
 }

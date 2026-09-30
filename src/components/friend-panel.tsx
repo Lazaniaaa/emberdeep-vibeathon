@@ -3,21 +3,28 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { friendFrame } from "@/chain/friend-sprite";
-import { FAMILY_PERKS, FRIEND_BLESSING_TEXT } from "@/game/catalog";
+import { FAMILY_PERKS, blessingText, familyPerkText } from "@/game/catalog";
+import { HOLD_FACTOR, LOCK_MAX } from "@/game/config";
+import { FRIEND_LOCK_KEY, strength } from "@/game/locks";
+import { useGame } from "@/state/store";
 import { shortAddress } from "@/lib/format";
 import { useWallet } from "@/state/wallet";
 import { PixelSprite } from "./pixel-sprite";
 
 export function FriendPanel() {
   const w = useWallet();
+  const locks = useGame(s => s.locks);
+  const round = useGame(s => s.round);
   const family = w.sprite ? FAMILY_PERKS[w.sprite.family] : null;
+  const locked = locks.some(l => l.key === FRIEND_LOCK_KEY);
+  const k = strength(locks.find(l => l.key === FRIEND_LOCK_KEY), round);
 
   return (
     <Card className="bg-gradient-to-b from-lime/[0.06] to-transparent ring-lime/25">
       <CardHeader>
         <CardTitle className="font-pixel text-lime">Rare Friend blessing</CardTitle>
         <CardDescription>
-          Optional. Hold a hardwired Rare Friend (generation 1+) on Robinhood Chain for {FRIEND_BLESSING_TEXT}, and descend as your Friend with its family perk.
+          Optional. Hold a hardwired Rare Friend (generation 1+) on Robinhood Chain and descend with {blessingText(HOLD_FACTOR)}, or as your Friend with its family perk. Lock it at the Ember Altar and the blessing grows to {blessingText(LOCK_MAX)}.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -63,7 +70,8 @@ export function FriendPanel() {
                   <Badge className="bg-lime text-black">Blessed</Badge>
                   {w.watchOnly && <Badge variant="outline">dev watch</Badge>}
                 </div>
-                {family && <p className="text-xs text-muted-foreground"><span className="text-foreground">{family.name}:</span> {family.text}</p>}
+                {family && w.sprite && <p className="text-xs text-muted-foreground"><span className="text-foreground">{family.name}:</span> {familyPerkText(w.sprite.family, k)}</p>}
+                <p className="text-xs text-muted-foreground">Blessing now: {blessingText(k)}{locked ? " (locked)" : " (held)"}</p>
                 {w.spriteStatus === "error" && (
                   <Button variant="link" size="xs" className="px-0" onClick={() => w.selected !== null && void w.select(w.selected)}>Retry artwork</Button>
                 )}
