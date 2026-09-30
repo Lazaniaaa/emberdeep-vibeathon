@@ -96,16 +96,16 @@ A Ward Charm makes Cerberus harmless for 15 steps, enough for a Rusty Dagger to 
   delvers' spend and gold. Every new round opens with a simulated crowd already in it.
 - `src/game/sim.ts` has two bots: one that sees the whole map and one that plays under fog of
   war. Both almost never die, so they are an **upper bound** on skilled play, not a forecast.
-  A 2-flask delver with no perks banks about 1.9 gold per RF spent (key included). The
-  simulated crowd banks 1.8, a bit below the average (about 2.2) of the 70/20/10 crowd of unperked, blessed and
+  A 2-flask delver with no perks banks about 1.8 gold per RF spent (key included). The
+  simulated crowd banks 1.8, a bit below the average (about 2.1) of the 70/20/10 crowd of unperked, blessed and
   top-build bots that the simulation uses, so a lone delver in the demo is measured against a crowd with good gear.
   The bots step off every marked tile and almost never die; real players make mistakes and die, so the true figure is
   probably lower, and the cap covers that case.
 - Because everything is shared out, the round pool never pays back more than its share (60%) of
   what was spent. Balance is therefore about who takes it. Against the demo's crowd an unperked
-  delver gets about 63% of their spend back, and the strongest build (Legendary Pathfinder +
-  Hoverer + Friend's Blessing, 3 flasks) about 126% (+26%) while merely held, 146% (+46%) once it has been
-  locked for 10+ rounds and 156% (+56%) with a full stake, funded by the others. The 160% cap stops
+  delver gets about 61% of their spend back, and the strongest build (Legendary Pathfinder +
+  Hoverer + Friend's Blessing, 3 flasks) about 132% (+32%) while merely held, 147% (+47%) once it has been
+  locked for 10+ rounds and 157% (+57%) with a full stake, funded by the others. The 160% cap stops
   anything above that. The edge shrinks as more players use it (about 80% when half the crowd runs the locked build). `npm run economy` regenerates the tables, including how the
   results move with the crowd's skill and size and what locks farm:
   [docs/economy-report.md](docs/economy-report.md).
@@ -275,7 +275,7 @@ npm test           # economy, dungeon, run rules and balance sim
 npm run typecheck
 npm run lint
 npm run build      # static site in dist/ (relative paths, host anywhere)
-node scripts/optimize-maps.mjs  # rebuild public/maps/*.webp from the originals in art-src/maps
+node scripts/optimize-maps.mjs  # rebuild public/maps/*.webp from the originals in art-src/maps (applies scripts/map-patches.mjs)
 npm run economy    # regenerate docs/economy-report.md (about a minute, deterministic)
 npm run smoke      # headless browser pass; needs `npx playwright install chromium` and a running dev server
 ```

@@ -99,7 +99,7 @@ function authoredMap(depth: number): AuthoredMap | null {
       return {
         roomCount: 3,
         rooms: [
-          { x: 3, y: 5, w: 7, h: 9 }, { x: 15, y: 6, w: 5, h: 7 }, { x: 25, y: 5, w: 7, h: 10 },
+          { x: 3, y: 5, w: 7, h: 9 }, { x: 15, y: 6, w: 5, h: 6 }, { x: 25, y: 6, w: 7, h: 9 },
           { x: 16, y: 17, w: 4, h: 2 },
         ],
         routes: [
@@ -113,7 +113,7 @@ function authoredMap(depth: number): AuthoredMap | null {
       return {
         roomCount: 3,
         rooms: [
-          { x: 3, y: 5, w: 9, h: 8 }, { x: 22, y: 3, w: 10, h: 7 }, { x: 10, y: 16, w: 16, h: 3 },
+          { x: 3, y: 5, w: 9, h: 8 }, { x: 22, y: 4, w: 10, h: 6 }, { x: 10, y: 16, w: 16, h: 3 },
         ],
         routes: [
           route([{ x: 11, y: 7 }, { x: 22, y: 7 }], 2),

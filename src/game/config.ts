@@ -45,7 +45,7 @@ export const MAX_KEYS = 30;
 export const FIELD_WEEK_SPEND = 20_000;
 /**
  * Simulated crowd: gold banked per RF they spend. The simulated 70/20/10 crowd of unperked, blessed and top-build
- * bots banks about 2.2; real players make mistakes the bots do not, so the crowd is set a little below that.
+ * bots banks about 2.1; real players make mistakes the bots do not, so the crowd is set a little below that.
  */
 export const FIELD_GOLD_PER_RF = 1.8;
 /**

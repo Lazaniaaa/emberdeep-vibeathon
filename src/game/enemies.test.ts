@@ -247,8 +247,8 @@ describe("the creatures and the floors they live on", () => {
     // In practice that is 60% more floor to walk on than the traced 27 x 17 layouts had.
     const walkable = (depth: number) => generateFloor(createRng(depth), depth, { findPct: 0 }).tiles.filter(t => t === 1).length;
     expect(walkable(1)).toBeGreaterThanOrEqual(185);
-    expect(walkable(2)).toBeGreaterThanOrEqual(200);
-    expect(walkable(3)).toBeGreaterThanOrEqual(235);
+    expect(walkable(2)).toBeGreaterThanOrEqual(190);
+    expect(walkable(3)).toBeGreaterThanOrEqual(225);
   });
 
   it("carries a saved floor of any depth through a copy without losing its creatures' state", () => {

@@ -5,6 +5,7 @@ import { mkdir, readdir, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import sharp from "sharp";
+import { hasPatch, makePicture, patchFloor } from "./map-patches.mjs";
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const source = path.join(root, "art-src", "maps");
@@ -22,7 +23,18 @@ for (const name of (await readdir(source)).filter(n => n.endsWith(".png")).sort(
   const scale = Math.min(CANVAS_W / width, CANVAS_H / height);
   const w = Math.round(width * scale), h = Math.round(height * scale);
   const output = path.join(target, name.replace(/\.png$/, ".webp"));
-  await sharp(input).resize(w, h, { kernel: "lanczos3" }).webp({ quality: QUALITY, effort: 6 }).toFile(output);
+  const depth = Number(name.match(/depth-(\d+)/)?.[1]);
+  const resized = sharp(input).resize(w, h, { kernel: "lanczos3" });
+  if (hasPatch(depth)) {
+    // Floors with touch-ups (see map-patches.mjs) are placed on the full game canvas first, where the patches are measured.
+    const left = Math.floor((CANVAS_W - w) / 2), top = Math.floor((CANVAS_H - h) / 2);
+    const { data } = await resized.ensureAlpha().extend({ top, bottom: CANVAS_H - h - top, left, right: CANVAS_W - w - left, background: "#000000" })
+      .raw().toBuffer({ resolveWithObject: true });
+    const patched = patchFloor(depth, makePicture(data, CANVAS_W, CANVAS_H));
+    await sharp(Buffer.from(patched.data), { raw: { width: CANVAS_W, height: CANVAS_H, channels: 4 } }).webp({ quality: QUALITY, effort: 6 }).toFile(output);
+  } else {
+    await resized.webp({ quality: QUALITY, effort: 6 }).toFile(output);
+  }
   const [a, b] = [(await stat(input)).size, (await stat(output)).size];
   before += a; after += b;
   console.log(`${name}: ${width}x${height} -> ${w}x${h}  ${(a / 1024).toFixed(0)} KB -> ${(b / 1024).toFixed(0)} KB`);
