@@ -275,7 +275,7 @@ npm test           # economy, dungeon, run rules and balance sim
 npm run typecheck
 npm run lint
 npm run build      # static site in dist/ (relative paths, host anywhere)
-node scripts/optimize-maps.mjs  # rebuild public/maps/*.webp from the originals in art-src/maps (applies scripts/map-patches.mjs)
+node scripts/optimize-maps.mjs  # rebuild public/maps/*.webp from the originals in art-src/maps (applies scripts/map-patches.mjs and redraws the floors on the tile grid with scripts/floor-regrid.mjs)
 npm run economy    # regenerate docs/economy-report.md (about a minute, deterministic)
 npm run smoke      # headless browser pass; needs `npx playwright install chromium` and a running dev server
 ```
