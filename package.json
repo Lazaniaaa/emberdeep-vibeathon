@@ -11,7 +11,8 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "smoke": "node scripts/smoke.mjs",
-    "economy": "vitest run --config vitest.economy.config.ts"
+    "economy": "vitest run --config vitest.economy.config.ts",
+    "tuning": "vitest run --config vitest.tuning.config.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

@@ -7,6 +7,7 @@ import { GEAR, GEAR_IDS, GEAR_DUPLICATE_XP, gearDamage, oilChance, propCounts, p
 import { createRng } from "./rng";
 import { applyAction, baseDamage, emptyBag, levelOf, startRun, xpOf, type RunState } from "./run";
 import { simulateFogRun } from "./sim";
+import { DEFAULT_TUNING } from "./tuning";
 
 /** An open 11 x 11 room with the delver in the middle, nothing else on it, and plenty of light. */
 function room(over: Partial<Parameters<typeof startRun>[0]> = {}): RunState {
@@ -209,10 +210,11 @@ describe("smashing", () => {
   });
 
   it("drops oil more often the lower the lantern is", () => {
-    expect(oilChance(0, 160)).toBeCloseTo(0.75);
-    expect(oilChance(160, 160)).toBeCloseTo(0.15);
+    const [full, empty] = DEFAULT_TUNING.propOilChance;
+    expect(oilChance(0, 160)).toBeCloseTo(empty);
+    expect(oilChance(160, 160)).toBeCloseTo(full);
     expect(oilChance(80, 160)).toBeGreaterThan(oilChance(120, 160));
-    expect(oilChance(400, 160)).toBeCloseTo(0.15);
+    expect(oilChance(400, 160)).toBeCloseTo(full);
     const dropRate = (light: number) => {
       let drops = 0;
       const trials = 400;
@@ -227,8 +229,8 @@ describe("smashing", () => {
     };
     const low = dropRate(10), high = dropRate(160);
     expect(low).toBeGreaterThan(high + 0.3);
-    expect(low).toBeGreaterThan(0.6);
-    expect(high).toBeLessThan(0.3);
+    expect(low).toBeGreaterThan(0.75);
+    expect(high).toBeLessThan(0.42);
   });
 
   it("sometimes gives gear, never the same piece twice, and gear adds to every blow", () => {

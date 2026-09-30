@@ -11,43 +11,43 @@ Strength: a perk you only hold works at ×0.6. A lock starts at ×0.8, gains ×0
 
 | Strategy | Cost per descent | Gold banked per RF spent | vs unperked, 2 flasks | Died | Avg deepest floor |
 | --- | --- | --- | --- | --- | --- |
-| Unperked, 1 flask | 70 RF | 1.36 | ×0.48 | 1% | 1.0 |
-| Unperked, 2 flasks | 90 RF | 2.80 | ×1.00 | 0% | 1.7 |
-| Unperked, 3 flasks | 110 RF | 3.55 | ×1.27 | 0% | 2.5 |
-| Friend's Blessing, held (×0.6), 2 flasks | 90 RF | 3.13 | ×1.12 | 0% | 1.7 |
-| Friend's Blessing, locked 4 rounds (×1.00), 2 flasks | 90 RF | 3.65 | ×1.30 | 0% | 1.8 |
-| Friend's Blessing, locked 10+ rounds (×1.3), 2 flasks | 90 RF | 3.87 | ×1.38 | 0% | 1.8 |
-| Strongest build, held (×0.6), 3 flasks | 110 RF | 7.31 | ×2.61 | 1% | 3.4 |
-| Strongest build, just locked (×0.8), 3 flasks | 110 RF | 8.81 | ×3.15 | 0% | 3.8 |
-| Strongest build, locked 4 rounds (×1.00), 3 flasks | 110 RF | 8.58 | ×3.07 | 4% | 3.8 |
-| Strongest build, locked 10+ rounds (×1.3), 3 flasks | 110 RF | 9.07 | ×3.24 | 4% | 3.8 |
-| Strongest build locked 10+ rounds and 5,000 RF staked, 3 flasks | 110 RF | 9.77 | ×3.49 | 4% | 3.8 |
+| Unperked, 1 flask | 70 RF | 2.02 | ×0.51 | 0% | 1.1 |
+| Unperked, 2 flasks | 90 RF | 3.92 | ×1.00 | 1% | 2.3 |
+| Unperked, 3 flasks | 110 RF | 4.71 | ×1.20 | 0% | 2.8 |
+| Friend's Blessing, held (×0.6), 2 flasks | 90 RF | 4.39 | ×1.12 | 1% | 2.3 |
+| Friend's Blessing, locked 4 rounds (×1.00), 2 flasks | 90 RF | 4.83 | ×1.23 | 1% | 2.2 |
+| Friend's Blessing, locked 10+ rounds (×1.3), 2 flasks | 90 RF | 5.12 | ×1.31 | 1% | 2.2 |
+| Strongest build, held (×0.6), 3 flasks | 110 RF | 11.57 | ×2.95 | 0% | 4.5 |
+| Strongest build, just locked (×0.8), 3 flasks | 110 RF | 13.71 | ×3.50 | 0% | 4.8 |
+| Strongest build, locked 4 rounds (×1.00), 3 flasks | 110 RF | 12.77 | ×3.26 | 6% | 4.7 |
+| Strongest build, locked 10+ rounds (×1.3), 3 flasks | 110 RF | 13.46 | ×3.43 | 6% | 4.7 |
+| Strongest build locked 10+ rounds and 5,000 RF staked, 3 flasks | 110 RF | 14.50 | ×3.70 | 6% | 4.7 |
 
 Holding is the weak setting on purpose. Locking wins the strength back over about four rounds and adds a little beyond it, so the reward for commitment is a stronger perk plus a share of the lock pool (table E), not a different game.
 
-## B. Sensitivity to the crowd's skill (the demo assumes 3 gold per RF)
+## B. Sensitivity to the crowd's skill (the demo assumes 4.2 gold per RF)
 
 One delver making 10 descents against a crowd that spent 20,000 RF and banked the given gold per RF. Cells are RF received from the round pool / RF put into the descents, after the return cap († = the cap bound).
 
-| Strategy | crowd 1.5 | crowd 2.2 | crowd 3 | crowd 3.6 | crowd 4.8 |
+| Strategy | crowd 2.2 | crowd 3.2 | crowd 4.2 | crowd 5.4 | crowd 6.6 |
 | --- | --- | --- | --- | --- | --- |
-| Unperked, 2 flasks | 108% | 75% | 56% | 47% | 36% |
-| Friend's Blessing, held (×0.6), 2 flasks | 120% | 84% | 62% | 52% | 40% |
-| Strongest build, held (×0.6), 3 flasks | 160% † | 160% † | 136% | 116% | 89% |
-| Strongest build, locked 10+ rounds (×1.3), 3 flasks | 160% † | 160% † | 160% † | 140% | 108% |
-| Strongest build locked 10+ rounds and 5,000 RF staked, 3 flasks | 160% † | 160% † | 160% † | 149% | 116% |
+| Unperked, 2 flasks | 103% | 73% | 56% | 44% | 36% |
+| Friend's Blessing, held (×0.6), 2 flasks | 115% | 81% | 63% | 49% | 40% |
+| Strongest build, held (×0.6), 3 flasks | 160% † | 160% † | 151% | 121% | 101% |
+| Strongest build, locked 10+ rounds (×1.3), 3 flasks | 160% † | 160% † | 160% † | 139% | 116% |
+| Strongest build locked 10+ rounds and 5,000 RF staked, 3 flasks | 160% † | 160% † | 160% † | 148% | 124% |
 
-A cell scales with `your gold per RF / the crowd's gold per RF`. If the demo's 3 is wrong, uncapped returns move by about the same factor, but the cap keeps the best case at +60% a round, and the sum paid out to the whole crowd stays at most 60% of spend.
+A cell scales with `your gold per RF / the crowd's gold per RF`. If the demo's 4.2 is wrong, uncapped returns move by about the same factor, but the cap keeps the best case at +60% a round, and the sum paid out to the whole crowd stays at most 60% of spend.
 
-## C. Sensitivity to crowd size (crowd of unperked 2-flask delvers at 3 gold per RF)
+## C. Sensitivity to crowd size (crowd of unperked 2-flask delvers at 4.2 gold per RF)
 
 | Strategy | crowd 2,000 RF | crowd 20,000 RF | crowd 200,000 RF |
 | --- | --- | --- | --- |
 | Unperked, 2 flasks | 57% | 56% | 56% |
-| Friend's Blessing, held (×0.6), 2 flasks | 62% | 62% | 63% |
-| Strongest build, held (×0.6), 3 flasks | 97% | 136% | 145% |
-| Strongest build, locked 10+ rounds (×1.3), 3 flasks | 106% | 160% † | 160% † |
-| Strongest build locked 10+ rounds and 5,000 RF staked, 3 flasks | 108% | 160% † | 160% † |
+| Friend's Blessing, held (×0.6), 2 flasks | 62% | 63% | 63% |
+| Strongest build, held (×0.6), 3 flasks | 102% | 151% | 160% † |
+| Strongest build, locked 10+ rounds (×1.3), 3 flasks | 108% | 160% † | 160% † |
+| Strongest build locked 10+ rounds and 5,000 RF staked, 3 flasks | 111% | 160% † | 160% † |
 
 In a tiny crowd one delver is a large part of the gold, so its own spend dilutes its share. Returns settle as the crowd grows.
 
@@ -59,10 +59,10 @@ Each row is a whole round with players in the given proportions (share of all de
 | Crowd: unperked / Blessing held / strongest held / strongest locked | Paid out / spent | Carried | Unperked | Blessing held | Strongest held | Strongest locked |
 | --- | --- | --- | --- | --- | --- | --- |
 | 100 / 0 / 0 / 0 | 60.0% | 0.0% | 60% | n/a | n/a | n/a |
-| 70 / 20 / 10 / 0 | 60.0% | 0.0% | 50% | 56% | 126% | n/a |
-| 70 / 20 / 0 / 10 | 60.0% | 0.0% | 47% | 53% | n/a | 145% |
-| 50 / 30 / 0 / 20 | 60.0% | 0.0% | 39% | 44% | n/a | 122% |
-| 20 / 30 / 0 / 50 | 60.0% | 0.0% | 28% | 31% | n/a | 85% |
+| 70 / 20 / 10 / 0 | 60.0% | 0.0% | 48% | 54% | 136% | n/a |
+| 70 / 20 / 0 / 10 | 60.0% | 0.0% | 46% | 52% | n/a | 153% |
+| 50 / 30 / 0 / 20 | 60.0% | 0.0% | 38% | 42% | n/a | 127% |
+| 20 / 30 / 0 / 50 | 60.0% | 0.0% | 26% | 29% | n/a | 86% |
 | 0 / 0 / 0 / 100 | 60.0% | 0.0% | n/a | n/a | n/a | 60% |
 
 The strongest build earns well above average only while few others play it. Its edge is paid by everyone else's gold, and it shrinks as it spreads (compare the rows); if everyone has it, the round pays every delver exactly 60% again.
@@ -106,14 +106,14 @@ A Legendary Delver farms about 10.42 RF in its first round. Breaking it before m
 
 A Delver can be sent away for 100 RF plus an optional pack (preview: 5 seconds; a live version would take hours to a day). The price is split 40% burned, 5% weekly Friend lot, 55% round pool. It comes back with a haul or with nothing.
 A haul is a multiplier between ×0.6 and ×15 of 1 key, 1 ticket and 120 gold; its rarity is drawn from Common 84%, Uncommon 12%, Rare 3%, Epic 0.7%, Legendary 0.1%. The average successful haul is ×1.16.
-Worth is in RF: a key 50, a ticket 20 (an assumption: what a ticket is worth depends on the whole week's draw), a gold 0.20 (what one gold is worth in the demo's round pool before the return cap). Hauls are never paid in RF.
+Worth is in RF: a key 50, a ticket 20 (an assumption: what a ticket is worth depends on the whole week's draw), a gold 0.14 (what one gold is worth in the demo's round pool before the return cap). Hauls are never paid in RF.
 
 | Pack | Total cost | Burned | Friend lot | Round pool | Returns with a haul | Average haul | Average worth | Worth ÷ cost | ×2 or more | ×5 or more | ×10 or more |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| No pack | 100 RF | 40 | 5 | 55 | 45% | 0.52 keys, 0.52 tickets, 63 gold | 49.19 RF | 49% | 3.9% | 0.36% | 0.05% |
-| Scout Pack | 130 RF | 52 | 6.5 | 71.5 | 58% | 0.67 keys, 0.67 tickets, 81 gold | 63.41 RF | 49% | 5.0% | 0.46% | 0.06% |
-| Ranger Pack | 160 RF | 64 | 8 | 88 | 70% | 0.81 keys, 0.81 tickets, 98 gold | 76.53 RF | 48% | 6.0% | 0.56% | 0.07% |
-| Vanguard Pack | 190 RF | 76 | 9.5 | 104.5 | 82% | 0.95 keys, 0.95 tickets, 114 gold | 89.64 RF | 47% | 7.1% | 0.66% | 0.08% |
+| No pack | 100 RF | 40 | 5 | 55 | 45% | 0.52 keys, 0.52 tickets, 63 gold | 45.61 RF | 46% | 3.9% | 0.36% | 0.05% |
+| Scout Pack | 130 RF | 52 | 6.5 | 71.5 | 58% | 0.67 keys, 0.67 tickets, 81 gold | 58.78 RF | 45% | 5.0% | 0.46% | 0.06% |
+| Ranger Pack | 160 RF | 64 | 8 | 88 | 70% | 0.81 keys, 0.81 tickets, 98 gold | 70.94 RF | 44% | 6.0% | 0.56% | 0.07% |
+| Vanguard Pack | 190 RF | 76 | 9.5 | 104.5 | 82% | 0.95 keys, 0.95 tickets, 114 gold | 83.1 RF | 44% | 7.1% | 0.66% | 0.08% |
 
 Even with the best pack an average trip is worth less than it cost, so an expedition is a sink with a lottery ticket attached, not a faucet. Packs are priced so that the average worth stays at about half the cost at every tier: a pack buys a steadier trip (a higher chance of coming back with a haul), not a better deal.
 The keys and tickets are game items, not RF, but a key is worth what a player would otherwise pay to descend (50 RF), so the table counts them. Gold joins the round like gold from a descent and is subject to the return cap.

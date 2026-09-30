@@ -1,6 +1,7 @@
 import { BOSS_DEPTH, BOSS_HP, BOSS_SIZE, HP_SCALE, enemyCount, floorHeight, floorScale, floorWidth } from "./config";
 import { enemyDef, pickEnemy, type EnemySpecies } from "./enemies";
 import { PROPS, propCounts, propDef, type PropKind } from "./props";
+import { tuning } from "./tuning";
 import { chance, int, type Rng } from "./rng";
 
 export const WALL = 0;
@@ -366,7 +367,7 @@ export function generateFloor(rng: Rng, depth: number, options: FloorOptions): F
   const count = (base: number) => Math.round(base * scale);
   for (let i = 0; i < count(6 + depth); i++) addItem("gold");
   for (let i = 0; i < count(3 + Math.floor(depth / 2)); i++) addItem("crystal");
-  for (let i = 0; i < count(Math.max(1, 3 - Math.floor(depth / 3))); i++) addItem("oil");
+  for (let i = 0; i < Math.round(count(Math.max(1, 3 - Math.floor(depth / 3))) * tuning.oilJarCount); i++) addItem("oil");
   addItem("chest", 6);
   if (chance(rng, Math.min(0.9, 0.4 * find))) addItem("chest", 6);
   if (scale > 1 && chance(rng, Math.min(0.9, 0.4 * find))) addItem("chest", 6);

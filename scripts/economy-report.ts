@@ -71,7 +71,7 @@ it("writes the economy report", { timeout: 900_000 }, () => {
     byName("Unperked, 2 flasks"), byName("Friend's Blessing, held"), byName("Strongest build, held"),
     byName("Strongest build, locked 10+"), byName("Strongest build locked 10+ rounds and"),
   ];
-  const crowdRates = [...new Set([1.5, 2.2, FIELD_GOLD_PER_RF, 3.6, 4.8])].sort((a, b) => a - b);
+  const crowdRates = [...new Set([2.2, 3.2, FIELD_GOLD_PER_RF, 5.4, 6.6])].sort((a, b) => a - b);
   const crowdSpend = 20_000;
   /** RF back / RF put into the descents, after the return cap; † marks a cap that bound. */
   const returnCell = (spend: number, gold: number, crowd: number, crowdGold: number) => {

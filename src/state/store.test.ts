@@ -4,6 +4,7 @@ import { NO_PERKS } from "@/game/catalog";
 import { KEY_PRICE, MAX_KEYS, MAX_ROUND_RETURN, RARITY_SUPPLY, ROUND_SEED_GOLD, ROUND_SEED_POOL, START_KEYS, WORLD_MINT_SEED } from "@/game/config";
 import { ARMORS } from "@/game/catalog";
 import { mintsLeft, rollSigilRarity } from "@/game/economy";
+import { withTuning } from "@/game/tuning";
 import { applyAction, emptyBag, startRun } from "@/game/run";
 
 describe("saved game recovery", () => {
@@ -53,7 +54,8 @@ describe("run settlement", () => {
     const perks = computeRunPerks(useGame.getState(), { hasFriend: false, family: null });
     const started = startRun({ seed: 7, flasks: 2, perks, weaponDamage: 5, bag: emptyBag() });
     started.floor.dimlings = [{ id: 1, x: started.player.x + 1, y: started.player.y, hp: 1, maxHp: 1, awake: true }];
-    const after = applyAction(started, { type: "move", dx: 1, dy: 0 });
+    // A defeated creature may also drop oil; switch that off to count only what the blade gives.
+    const after = withTuning({ killDropChance: [0, 0] }, () => applyAction(started, { type: "move", dx: 1, dy: 0 }));
     expect(after.kills).toBe(1);
     expect(after.light).toBe(started.light + 4 - 1);
     useGame.getState().reset();

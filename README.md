@@ -58,12 +58,12 @@ six on depth 1, one more each depth. They hit back, but never without warning. A
 *winds up*: the tiles its blow will hit get a red ring (a line for some, a cross around it for others) for one or two
 turns. Step off the rings and the blow lands on nothing, and the creature is left open for a turn. Stay on
 them and the blow drinks your light. Bump into a creature to attack it; your weapon decides how many swings it
-takes. Kills drop a little gold and some experience.
+takes. Kills drop a little gold, some experience and sometimes oil (35% with a full lantern, up to 80% when it is nearly out; 5-10 light).
 
 **Smash things.** Urns, crates and barrels stand in the rooms (about six a floor, and never where they would shut a
 route). Walk into one to hit it; it cracks and then breaks, and a blow costs a turn like any other. A break gives steady
 gold, experience, sometimes **oil** (light), and sometimes a piece of **gear**. The emptier your lantern, the likelier
-the oil: 15% with it full, up to 75% when it is nearly out. A Clay Urn breaks in a blow or two, a Wooden Crate takes a
+the oil: 30% with it full, up to 90% when it is nearly out (6-21 light, more from the tougher props). A Clay Urn breaks in a blow or two, a Wooden Crate takes a
 couple more, an Iron-bound Barrel is the toughest and pays the most. Gear is a Rusty Sword (+6 damage), a Hand Axe
 (+5) or a Miner's Pickaxe (+4, and it breaks any prop in one blow); each lasts for the descent, and a second copy
 turns into experience.
@@ -109,17 +109,17 @@ A Ward Charm makes Cerberus harmless for 15 steps, enough for a Rusty Dagger to 
   delvers' spend and gold. Every new round opens with a simulated crowd already in it.
 - `src/game/sim.ts` has two bots: one that sees the whole map and one that plays under fog of
   war. Both almost never die, so they are an **upper bound** on skilled play, not a forecast.
-  A 2-flask delver with no perks banks about 2.8 gold per RF spent (key included). The
-  simulated crowd banks 3.0, a bit below the average (about 3.3) of the 70/20/10 crowd of unperked, blessed and
+  A 2-flask delver with no perks banks about 3.9 gold per RF spent (key included). The
+  simulated crowd banks 4.2, a bit below the average (about 4.8) of the 70/20/10 crowd of unperked, blessed and
   top-build bots that the simulation uses, so a lone delver in the demo is measured against a crowd with good gear.
   The bots step off every marked tile and almost never die; real players make mistakes and die, so the true figure is
   probably lower, and the cap covers that case.
 - Because everything is shared out, the round pool never pays back more than its share (60%) of
   what was spent. Balance is therefore about who takes it. Against the demo's crowd an unperked
   delver gets about 56% of their spend back, and the strongest build (Legendary Pathfinder +
-  Hoverer + Friend's Blessing, 3 flasks) about 136% (+36%) while merely held, and once it has been locked for 10+ rounds or carries
+  Hoverer + Friend's Blessing, 3 flasks) about 151% (+51%) while merely held, and once it has been locked for 10+ rounds or carries
   a full stake it reaches the 160% cap (+60%), funded by the others. The 160% cap stops
-  anything above that. The edge shrinks as more players use it (about 80% when half the crowd runs the locked build). `npm run economy` regenerates the tables, including how the
+  anything above that. The edge shrinks as more players use it (about 86% when half the crowd runs the locked build). `npm run economy` regenerates the tables, including how the
   results move with the crowd's skill and size and what locks farm:
   [docs/economy-report.md](docs/economy-report.md).
 - Step discounts (Pathfinder, Hoverer) act like extra light, so their total is capped at 40%.
@@ -289,7 +289,8 @@ npm run typecheck
 npm run lint
 npm run build      # static site in dist/ (relative paths, host anywhere)
 node scripts/optimize-maps.mjs  # rebuild public/maps/*.webp from the originals in art-src/maps (applies scripts/map-patches.mjs and redraws the floors on the tile grid with scripts/floor-regrid.mjs)
-npm run economy    # regenerate docs/economy-report.md (about a minute, deterministic)
+npm run economy    # regenerate docs/economy-report.md (a few minutes, deterministic)
+npm run tuning     # regenerate docs/light-tuning.md: how far an amount of oil carries a descent (a few minutes)
 npm run smoke      # headless browser pass; needs `npx playwright install chromium` and a running dev server
 ```
 

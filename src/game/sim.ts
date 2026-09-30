@@ -1,4 +1,4 @@
-import { ACTIVE_SHARE, FLASK_PRICE, KEY_PRICE, MAX_ROUND_RETURN } from "./config";
+import { ACTIVE_SHARE, BOSS_DEPTH, FLASK_PRICE, KEY_PRICE, MAX_ROUND_RETURN } from "./config";
 import { NO_PERKS, WEAPONS, mergePerks, type Perks } from "./catalog";
 import { dimlingDistance, distances, footprint, idx, isFloor, visibleSet, type Point } from "./dungeon";
 import { attackTiles } from "./enemy-ai";
@@ -100,7 +100,14 @@ function stepAlong(state: RunState, dist: number[]) {
  * explores the nearest unexplored edge, fights what blocks it and heads home on a reserve.
  * It never buys potions, so it does not use Night Vision as a safety net.
  */
-export function simulateFogRun(seed: number, flasks = 1, perks: Perks = NO_PERKS, greed = 1.6, weaponDamage = WEAPONS.dagger.damage): SimResult {
+export type BotStyle = {
+  /** A careful player steps off the tiles a creature has marked. A sloppy one does not look. Default true. */
+  dodge?: boolean;
+  /** The bot knows the whole floor, as a player does who has walked it before: it heads straight for the stairs. */
+  knowsMap?: boolean;
+};
+
+export function simulateFogRun(seed: number, flasks = 1, perks: Perks = NO_PERKS, greed = 1.6, weaponDamage = WEAPONS.dagger.damage, style: BotStyle = {}): SimResult {
   let s = startRun({ seed, flasks, perks: mergePerks(perks), weaponDamage, bag: emptyBag() });
   let sawItems = new Set<number>();
   let floorDepth = s.depth;
@@ -119,7 +126,7 @@ export function simulateFogRun(seed: number, flasks = 1, perks: Perks = NO_PERKS
 
     // A creature that is winding up marks the tiles it will hit. A careful player steps off them, or strikes first.
     const marked = new Set(s.floor.dimlings.filter(d => !d.boss && d.phase === "windup").flatMap(d => attackTiles(s.floor, d)).map(t => idx(s.floor, t.x, t.y)));
-    if (marked.has(idx(s.floor, s.player.x, s.player.y))) {
+    if (style.dodge !== false && marked.has(idx(s.floor, s.player.x, s.player.y))) {
       const occupied = new Set([
         ...s.floor.dimlings.flatMap(d => footprint(d).map(c => idx(s.floor, c.x, c.y))),
         ...propsOf(s.floor).map(p => idx(s.floor, p.x, p.y)),
@@ -179,6 +186,72 @@ export function simulateFogRun(seed: number, flasks = 1, perks: Perks = NO_PERKS
   const died = s.status !== "extracted";
   return { spent: runCost(flasks), banked: died ? 0 : s.gold, depth: s.deepest, died, gold: s.gold, level: s.level ?? 1, smashed: s.smashed ?? 0, kills: s.kills };
 }
+
+/**
+ * A bot that only wants to go down. It fights what blocks it or strikes at it, picks up what lies within a few steps of its
+ * path, takes the stairs the moment it stands on them and never goes home, so it stops only when the light is gone.
+ * How deep it gets on a given amount of oil is how far that oil can carry a player who does not stop to collect.
+ */
+export function simulateDiveRun(seed: number, flasks = 1, perks: Perks = NO_PERKS, weaponDamage = WEAPONS.dagger.damage, style: BotStyle = {}): DiveResult {
+  let s = startRun({ seed, flasks, perks: mergePerks(perks), weaponDamage, bag: emptyBag() });
+  const move = (d: Point | null) => (d ? applyAction(s, { type: "move", dx: d.x, dy: d.y }) : applyAction(s, { type: "wait" }));
+  const reach = new Map<number, number>();
+  reach.set(1, 0);
+  for (let turn = 0; turn < 6_000 && s.status === "playing"; turn++) {
+    if (!reach.has(s.depth)) reach.set(s.depth, s.steps);
+    const pathFrom = (from: Point) => (style.knowsMap ? distances(s.floor, from) : knownDistances(s, from));
+    const known = pathFrom(s.player);
+    const marked = new Set(s.floor.dimlings.filter(d => !d.boss && d.phase === "windup").flatMap(d => attackTiles(s.floor, d)).map(t => idx(s.floor, t.x, t.y)));
+    if (style.dodge !== false && marked.has(idx(s.floor, s.player.x, s.player.y))) {
+      const occupied = new Set([
+        ...s.floor.dimlings.flatMap(d => footprint(d).map(c => idx(s.floor, c.x, c.y))),
+        ...propsOf(s.floor).map(p => idx(s.floor, p.x, p.y)),
+      ]);
+      const escape = DIRS4
+        .map(o => ({ o, x: s.player.x + o.x, y: s.player.y + o.y }))
+        .find(({ x, y }) => isFloor(s.floor, x, y) && !marked.has(idx(s.floor, x, y)) && !occupied.has(idx(s.floor, x, y)));
+      if (escape) { s = move(escape.o); continue; }
+    }
+    const foe = s.floor.dimlings.find(d => d.awake && dimlingDistance(d, s.player) === 1);
+    if (foe) {
+      const touching = DIRS4.find(o => dimlingDistance(foe, { x: s.player.x + o.x, y: s.player.y + o.y }) === 0)!;
+      s = move(touching); continue;
+    }
+    if (onStairs(s) && !bossAlive(s)) { s = applyAction(s, { type: "descend" }); continue; }
+
+    const seen = visibleSet(s.floor, s.player, currentRadius(s));
+    // Loot within a few steps of where we stand is worth a detour; anything further is not.
+    const nearby = [...s.floor.items, ...propsOf(s.floor)]
+      .filter(i => seen.has(idx(s.floor, i.x, i.y)) && known[idx(s.floor, i.x, i.y)] > 0 && known[idx(s.floor, i.x, i.y)] <= 4)
+      .sort((a, b) => known[idx(s.floor, a.x, a.y)] - known[idx(s.floor, b.x, b.y)])[0];
+    if (nearby) { s = move(stepAlong(s, pathFrom(nearby))); continue; }
+
+    // The boss blocks the stairs of the last painted floor: go and fight it.
+    const boss = s.floor.dimlings.find(d => d.boss);
+    if (boss && s.depth === BOSS_DEPTH && known[idx(s.floor, boss.x, boss.y)] !== -1) {
+      s = move(stepAlong(s, pathFrom(boss))); continue;
+    }
+    const stairsKnown = style.knowsMap || s.floor.seen[idx(s.floor, s.floor.stairs.x, s.floor.stairs.y)] === 1;
+    if (stairsKnown && known[idx(s.floor, s.floor.stairs.x, s.floor.stairs.y)] > 0) {
+      s = move(stepAlong(s, pathFrom(s.floor.stairs))); continue;
+    }
+    let frontier: Point | null = null, best = Infinity;
+    for (let y = 0; y < s.floor.h; y++) for (let x = 0; x < s.floor.w; x++) {
+      const d = known[idx(s.floor, x, y)];
+      if (d <= 0 || d >= best) continue;
+      const open = DIRS4.some(o => {
+        const nx = x + o.x, ny = y + o.y;
+        return nx >= 0 && ny >= 0 && nx < s.floor.w && ny < s.floor.h && !s.floor.seen[idx(s.floor, nx, ny)];
+      });
+      if (open) { best = d; frontier = { x, y }; }
+    }
+    if (frontier) { s = move(stepAlong(s, knownDistances(s, frontier))); continue; }
+    s = move(null);
+  }
+  return { depth: s.deepest, died: s.status !== "extracted", level: s.level ?? 1, steps: s.steps, kills: s.kills, smashed: s.smashed ?? 0, bossSlain: !!s.bossSlain, arrival: Object.fromEntries(reach) };
+}
+
+export type DiveResult = { depth: number; died: boolean; level: number; steps: number; kills: number; smashed: number; bossSlain: boolean; arrival: Record<number, number> };
 
 export type SimSummary = { goldPerRf: number; deathRate: number; avgDepth: number };
 

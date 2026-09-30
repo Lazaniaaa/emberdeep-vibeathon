@@ -7,8 +7,9 @@ import { POTIONS, POTION_DROP_WEIGHTS, type Perks, type PotionId } from "./catal
 import { dimlingDistance, distances, footprint, generateFloor, idx, isFloor, visibleSet, type Dimling, type Floor, type Point, type Prop } from "./dungeon";
 import { attackTiles, reachDirection } from "./enemy-ai";
 import { enemyDef, enemyName } from "./enemies";
-import { BOSS_XP, CHEST_XP, HOARD_XP, LEVEL_DAMAGE, LEVEL_LIGHT, MAX_LEVEL, VAULT_XP, killXp, levelDamage, xpToNext } from "./levels";
-import { GEAR, GEAR_DUPLICATE_XP, GEAR_IDS, gearDamage, oilChance, propDef, type GearId } from "./props";
+import { BOSS_XP, CHEST_XP, HOARD_XP, LEVEL_DAMAGE, MAX_LEVEL, VAULT_XP, killXp, levelDamage, xpToNext } from "./levels";
+import { GEAR, GEAR_DUPLICATE_XP, GEAR_IDS, gearDamage, lanternFullness, oilChance, propDef, type GearId } from "./props";
+import { noteLight, tuning } from "./tuning";
 import { chance, createRng, int, weighted, type Rng } from "./rng";
 
 export type RunEvent =
@@ -162,7 +163,8 @@ function pickup(state: RunState) {
       break;
     }
     case "oil": {
-      state.light += 8; state.events.push("oil"); say(state, "+8 light from a spilled oil jar");
+      state.light += tuning.oilJarLight; noteLight("jars", tuning.oilJarLight);
+      state.events.push("oil"); say(state, `+${tuning.oilJarLight} light from a spilled oil jar`);
       break;
     }
     case "chest": {
@@ -219,9 +221,10 @@ function gainXp(state: RunState, amount: number) {
   while (level < MAX_LEVEL && xp >= xpToNext(level)) {
     xp -= xpToNext(level);
     level++;
-    state.light += LEVEL_LIGHT;
+    state.light += tuning.levelLight;
+    noteLight("levels", tuning.levelLight);
     state.events.push("levelup");
-    say(state, `Level ${level}! +${LEVEL_LIGHT} light, +${LEVEL_DAMAGE} damage.`);
+    say(state, `Level ${level}! +${tuning.levelLight} light, +${LEVEL_DAMAGE} damage.`);
   }
   state.level = level;
   state.xp = level >= MAX_LEVEL ? 0 : xp;
@@ -249,9 +252,10 @@ function smash(state: RunState, prop: Prop) {
   const g = loot(state, int(rng, def.gold[0], def.gold[1]), "gold");
   state.gold += g;
   parts.push(`+${g} gold`);
-  if (chance(rng, oilChance(state.light, state.startLight))) {
-    const oil = int(rng, def.oil[0], def.oil[1]);
+  if (tuning.propOilScale > 0 && chance(rng, oilChance(state.light, state.startLight))) {
+    const oil = Math.max(1, Math.round(int(rng, def.oil[0], def.oil[1]) * tuning.propOilScale));
     state.light += oil;
+    noteLight("props", oil);
     state.events.push("oil");
     parts.push(`+${oil} light`);
   }
@@ -284,6 +288,7 @@ function burnLight(state: RunState) {
   if (state.nightVision > 0 && state.light <= 0) {
     state.nightVision--;
   } else if (!chance(state.rng, state.perks.freeStepChance)) {
+    noteLight("steps", Math.min(state.light, currentStepCost(state)));
     state.light = Math.max(0, state.light - currentStepCost(state));
   }
   if (state.perks.regenEvery && state.steps % state.perks.regenEvery === 0) state.light += 1;
@@ -294,6 +299,7 @@ function burnLight(state: RunState) {
 const hitBase = (state: RunState) => (2 + Math.floor(state.depth / 2)) * ENEMY_HIT_MULT;
 
 function drainLight(state: RunState, amount: number) {
+  noteLight("hits", amount);
   if (state.light > 0) state.light = Math.max(0, state.light - amount);
   else if (state.nightVision > 0) state.nightVision = Math.max(0, state.nightVision - Math.ceil(amount));
 }
@@ -460,7 +466,20 @@ export function applyAction(prev: RunState, action: RunAction): RunState {
           if (state.perks.lightOnKill) state.light += state.perks.lightOnKill;
           state.events.push("kill");
           const xp = killXp(state.depth);
-          say(state, `${enemyName(target.species)} defeated: +${g} gold, +${xp} xp${state.perks.lightOnKill ? `, +${state.perks.lightOnKill} light` : ""}`);
+          // A defeated creature may drop oil, likelier the lower the lantern is, like a prop does.
+          let dropped = 0;
+          const [dropFull, dropEmpty] = tuning.killDropChance;
+          if (dropFull > 0 || dropEmpty > 0) {
+            const p = dropFull + (dropEmpty - dropFull) * (1 - lanternFullness(state.light, state.startLight));
+            if (chance(state.rng, p)) {
+              dropped = int(state.rng, tuning.killDropLight[0], tuning.killDropLight[1]);
+              state.light += dropped;
+              noteLight("kills", dropped);
+              state.events.push("oil");
+            }
+          }
+          const extraLight = (state.perks.lightOnKill ? state.perks.lightOnKill : 0) + dropped;
+          say(state, `${enemyName(target.species)} defeated: +${g} gold, +${xp} xp${extraLight ? `, +${extraLight} light` : ""}`);
           rollTicket(state);
           gainXp(state, xp);
         } else {

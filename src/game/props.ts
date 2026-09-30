@@ -1,4 +1,5 @@
 import { HP_SCALE } from "./config";
+import { tuning } from "./tuning";
 
 /**
  * Things to smash. They stand in the way like a creature: walk into one to hit it, and when it breaks it gives gold,
@@ -22,9 +23,9 @@ export type PropDef = {
 };
 
 export const PROPS: readonly PropDef[] = [
-  { id: "urn", name: "Clay Urn", hp: Math.round(1.5 * HP_SCALE), gold: [2, 3], xp: [1, 2], oil: [4, 7], gear: 0, blurb: "Brittle. Gold and a little oil." },
-  { id: "crate", name: "Wooden Crate", hp: 3 * HP_SCALE, gold: [4, 6], xp: [3, 4], oil: [6, 10], gear: 0.06, blurb: "Takes a couple of blows. Might hide a tool." },
-  { id: "barrel", name: "Iron-bound Barrel", hp: 5 * HP_SCALE, gold: [8, 10], xp: [5, 7], oil: [8, 14], gear: 0.16, blurb: "Tough, and the best of the three." },
+  { id: "urn", name: "Clay Urn", hp: Math.round(1.5 * HP_SCALE), gold: [2, 3], xp: [1, 2], oil: [6, 10], gear: 0, blurb: "Brittle. Gold and a little oil." },
+  { id: "crate", name: "Wooden Crate", hp: 3 * HP_SCALE, gold: [4, 6], xp: [3, 4], oil: [9, 15], gear: 0.06, blurb: "Takes a couple of blows. Might hide a tool." },
+  { id: "barrel", name: "Iron-bound Barrel", hp: 5 * HP_SCALE, gold: [8, 10], xp: [5, 7], oil: [12, 21], gear: 0.16, blurb: "Tough, and the best of the three." },
 ];
 
 export const propDef = (kind: PropKind): PropDef => PROPS.find(p => p.id === kind) ?? PROPS[0];
@@ -40,12 +41,15 @@ export const propCounts = (depth: number): Record<PropKind, number> => ({
 
 /**
  * Chance that a broken prop holds oil. It is higher the lower the lantern is, so a delver running dry finds a little
- * more help: 15% with the lantern full, up to 75% with it empty.
+ * more help: 30% with the lantern full, up to 90% with it empty (see tuning.ts).
  */
 export function oilChance(light: number, startLight: number) {
-  const fullness = Math.min(1, Math.max(0, light / Math.max(startLight, 80)));
-  return 0.15 + 0.6 * (1 - fullness);
+  const [full, empty] = tuning.propOilChance;
+  return full + (empty - full) * (1 - lanternFullness(light, startLight));
 }
+
+/** How full the lantern is, from 0 to 1, against the light the descent started with (at least one flask). */
+export const lanternFullness = (light: number, startLight: number) => Math.min(1, Math.max(0, light / Math.max(startLight, 80)));
 
 /** Gear found in props. Each adds to every blow for the rest of the descent; the pickaxe also breaks any prop in one blow. */
 export type GearId = "sword" | "axe" | "pickaxe";
