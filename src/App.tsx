@@ -2,7 +2,6 @@ import { lazy, Suspense, useEffect } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CampScene } from "@/components/camp-scene";
-import { Header } from "@/components/header";
 import { ReportDialog } from "@/components/report-dialog";
 import { cn } from "@/lib/utils";
 import { useRun } from "@/state/run-store";
@@ -24,11 +23,8 @@ export default function App() {
   return (
     <TooltipProvider>
       {inRun ? (
-        <div className={cn("min-h-dvh bg-black text-foreground", reducedMotion && "reduced-motion")}>
-          <Header />
-          <main className="mx-auto max-w-6xl px-4 py-6">
-            <Suspense fallback={<p className="py-12 text-center text-muted-foreground">Entering the deep…</p>}><RunView /></Suspense>
-          </main>
+        <div className={cn(reducedMotion && "reduced-motion")}>
+          <Suspense fallback={<p className="fixed inset-0 grid place-items-center bg-black text-muted-foreground">Entering the deep…</p>}><RunView /></Suspense>
         </div>
       ) : (
         <div className={cn(reducedMotion && "reduced-motion")}><CampScene /></div>

@@ -1,14 +1,21 @@
 import {
-  BOSS_DRAIN, BOSS_MOVE_FACTOR, FLASK_LIGHT, HEAL_LIGHT, HOARD_CRYSTALS, HOARD_GOLD, HOARD_SIGIL_CHANCE, NIGHT_VISION_STEPS,
-  RAGE_HITS, RAGE_MULT, REGEN_TURNS, SIGIL_DROP_CHANCE, TICKET_DROP_CHANCE, WARD_STEPS, lightRadius, lootMultiplier, stepCost,
+  BOSS_DRAIN, BOSS_MOVE_FACTOR, ENEMY_HIT_MULT, ENEMY_RECOVERY, FLASK_LIGHT, KILL_GOLD, HEAL_LIGHT, HOARD_CRYSTALS, HOARD_GOLD, HOARD_SIGIL_CHANCE,
+  NIGHT_VISION_STEPS, RAGE_HITS, RAGE_MULT, REGEN_TURNS, SIGIL_DROP_CHANCE, TICKET_DROP_CHANCE, WARD_STEPS, lightRadius, lootMultiplier,
+  stepCost,
 } from "./config";
 import { POTIONS, POTION_DROP_WEIGHTS, type Perks, type PotionId } from "./catalog";
 import { dimlingDistance, distances, footprint, generateFloor, idx, isFloor, visibleSet, type Dimling, type Floor, type Point } from "./dungeon";
+import { attackTiles, reachDirection } from "./enemy-ai";
+import { enemyDef, enemyName } from "./enemies";
 import { chance, createRng, int, weighted, type Rng } from "./rng";
 
 export type RunEvent =
   | "step" | "bump" | "gold" | "crystal" | "oil" | "chest" | "vault" | "sigil"
-  | "hit" | "kill" | "boss" | "hoard" | "drain" | "sealed" | "descend" | "potion" | "nightVision" | "dark" | "extract" | "ticket";
+  | "hit" | "kill" | "boss" | "hoard" | "drain" | "sealed" | "descend" | "potion" | "nightVision" | "dark" | "extract" | "ticket"
+  /** A creature started winding up: its next blow is marked on the floor. */
+  | "warn"
+  /** A creature struck and the delver had stepped aside. */
+  | "miss";
 
 export type PotionBag = Record<PotionId, number>;
 
@@ -201,30 +208,98 @@ function burnLight(state: RunState) {
   if ((state.regen ?? 0) > 0) { state.light += 1; state.regen = (state.regen ?? 0) - 1; }
 }
 
+/** Light a creature's blow takes from a delver who is hit, before armor and perks. */
+const hitBase = (state: RunState) => (2 + Math.floor(state.depth / 2)) * ENEMY_HIT_MULT;
+
+function drainLight(state: RunState, amount: number) {
+  if (state.light > 0) state.light = Math.max(0, state.light - amount);
+  else if (state.nightVision > 0) state.nightVision = Math.max(0, state.nightVision - Math.ceil(amount));
+}
+
+/** The blow lands: whoever is on the marked tiles pays in light, and the creature is left open for a turn. */
+function strike(state: RunState, d: Dimling) {
+  const name = enemyName(d.species);
+  const hit = attackTiles(state.floor, d).some(t => t.x === state.player.x && t.y === state.player.y);
+  d.phase = "recovery";
+  d.cooldown = ENEMY_RECOVERY;
+  d.windupLeft = 0;
+  d.aim = null;
+  if (!hit) {
+    state.events.push("miss");
+    say(state, `${name} strikes and hits nothing. It is open for a turn.`);
+    return;
+  }
+  if (state.ward > 0) {
+    state.events.push("miss");
+    say(state, `Your ward turns aside the ${name}'s blow. It is open for a turn.`);
+    return;
+  }
+  const drain = hitBase(state) * (1 - state.perks.drainReduce);
+  drainLight(state, drain);
+  state.events.push("drain");
+  say(state, `${name} strikes (-${Math.round(drain * 10) / 10} light). It is open for a turn.`);
+}
+
+/** A creature's turn: recover, finish a wind-up, start one when the delver is in reach, or close in. */
+function creatureAct(state: RunState, d: Dimling, visible: Set<number>, nearest: (cells: Point[]) => number, moveChance: number) {
+  const { floor, player, rng } = state;
+  const def = enemyDef(d.species);
+  if (d.phase === "recovery") {
+    d.cooldown = (d.cooldown ?? 1) - 1;
+    if (d.cooldown <= 0) { d.phase = "idle"; d.cooldown = 0; }
+    return;
+  }
+  if (d.phase === "windup") {
+    if ((d.windupLeft ?? 1) > 1) {
+      d.windupLeft = (d.windupLeft ?? 1) - 1;
+      say(state, `${def.name} is still winding up. Step off the marked tiles.`);
+    } else strike(state, d);
+    return;
+  }
+  // It only attacks what it can be seen attacking, so the warning is always visible.
+  const dir = reachDirection(floor, d, player);
+  if (dir && visible.has(idx(floor, d.x, d.y))) {
+    d.phase = "windup";
+    d.windupLeft = def.windup;
+    d.aim = def.attack === "line" ? dir : null;
+    state.events.push("warn");
+    say(state, `${def.name} winds up. Step off the marked tiles${def.windup > 1 ? ` (${def.windup} turns)` : " (next move)"}.`);
+    return;
+  }
+  if (def.move <= 0 || !chance(rng, Math.min(0.95, moveChance * def.move))) return;
+  const here = nearest(footprint(d));
+  const options = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }]
+    .map(step => ({ x: d.x + step.x, y: d.y + step.y }))
+    .filter(p => isFloor(floor, p.x, p.y)
+      && !(p.x === player.x && p.y === player.y)
+      && !floor.dimlings.some(o => o !== d && footprint(o).some(oc => oc.x === p.x && oc.y === p.y))
+      && nearest([p]) < here)
+    .sort((a, b) => nearest([a]) - nearest([b]));
+  if (options.length) { d.x = options[0].x; d.y = options[0].y; }
+}
+
 function dimlingsAct(state: RunState) {
   const { floor, player, rng } = state;
   const moveChance = Math.min(0.9, 0.55 + 0.05 * state.depth);
   const notice = state.perks.stealth ? 1 : currentRadius(state) + 2;
   const path = distances(floor, player);
-  const nearest = (cells: Point[]) => Math.min(...cells.map(c => path[idx(c.x, c.y)]).filter(v => v >= 0));
+  const nearest = (cells: Point[]) => Math.min(...cells.map(c => path[idx(floor, c.x, c.y)]).filter(v => v >= 0));
+  const visible = visibleSet(floor, player, currentRadius(state));
   for (const d of floor.dimlings) {
     const dist = dimlingDistance(d, player);
     if (!d.awake && dist <= notice) d.awake = true;
     if (!d.awake) continue;
+    if (!d.boss) { creatureAct(state, d, visible, nearest, moveChance); continue; }
+    // Cerberus does not wind up: it drinks light every turn the delver touches it, and it moves at half a creature's pace.
     if (dist === 1) {
       if (state.ward > 0) continue;
-      const base = d.boss ? BOSS_DRAIN : 2 + Math.floor(state.depth / 2);
-      const drain = base * (1 - state.perks.drainReduce);
-      if (state.light > 0) {
-        state.light = Math.max(0, state.light - drain);
-      } else if (state.nightVision > 0) {
-        state.nightVision = Math.max(0, state.nightVision - Math.ceil(drain));
-      }
+      const drain = BOSS_DRAIN * (1 - state.perks.drainReduce);
+      drainLight(state, drain);
       state.events.push("drain");
-      say(state, `${d.boss ? "Cerberus" : "A dimling"} drinks your light (-${Math.round(drain * 10) / 10})`);
+      say(state, `Cerberus drinks your light (-${Math.round(drain * 10) / 10})`);
       continue;
     }
-    if (!chance(rng, d.boss ? moveChance * BOSS_MOVE_FACTOR : moveChance)) continue;
+    if (!chance(rng, moveChance * BOSS_MOVE_FACTOR)) continue;
     const here = nearest(footprint(d));
     const options = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }]
       .map(step => ({ x: d.x + step.x, y: d.y + step.y }))
@@ -295,15 +370,15 @@ export function applyAction(prev: RunState, action: RunAction): RunState {
           slayBoss(state, target);
         } else if (target.hp <= 0) {
           state.floor.dimlings = state.floor.dimlings.filter(d => d !== target);
-          const g = loot(state, int(state.rng, 2, 4), "gold");
+          const g = loot(state, int(state.rng, KILL_GOLD[0], KILL_GOLD[1]), "gold");
           state.gold += g; state.kills++;
           if (state.perks.lightOnKill) state.light += state.perks.lightOnKill;
           state.events.push("kill");
-          say(state, `Dimling dispersed: +${g} gold${state.perks.lightOnKill ? `, +${state.perks.lightOnKill} light` : ""}`);
+          say(state, `${enemyName(target.species)} defeated: +${g} gold${state.perks.lightOnKill ? `, +${state.perks.lightOnKill} light` : ""}`);
           rollTicket(state);
         } else {
           state.events.push("hit");
-          say(state, `You hit ${target.boss ? "Cerberus" : "a dimling"} for ${dmg} (${target.hp}/${target.maxHp} left)`);
+          say(state, `You hit ${target.boss ? "Cerberus" : enemyName(target.species)} for ${dmg} (${target.hp}/${target.maxHp} left)`);
         }
         endTurn(state);
         break;
@@ -379,5 +454,5 @@ export function applyAction(prev: RunState, action: RunAction): RunState {
 }
 
 export function isVisible(state: RunState, x: number, y: number, visible: Set<number>) {
-  return state.floor.revealed ? state.floor.seen[idx(x, y)] === 1 : visible.has(idx(x, y));
+  return state.floor.revealed ? state.floor.seen[idx(state.floor, x, y)] === 1 : visible.has(idx(state.floor, x, y));
 }

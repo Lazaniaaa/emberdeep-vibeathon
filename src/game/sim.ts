@@ -1,6 +1,7 @@
 import { ACTIVE_SHARE, FLASK_PRICE, KEY_PRICE, MAX_ROUND_RETURN } from "./config";
 import { NO_PERKS, WEAPONS, mergePerks, type Perks } from "./catalog";
-import { dimlingDistance, distances, idx, isFloor, visibleSet, type Point } from "./dungeon";
+import { dimlingDistance, distances, footprint, idx, isFloor, visibleSet, type Point } from "./dungeon";
+import { attackTiles } from "./enemy-ai";
 import { settleRound } from "./economy";
 import { applyAction, bossAlive, currentRadius, currentStepCost, emptyBag, onRift, onStairs, startRun, type RunState } from "./run";
 
@@ -8,11 +9,11 @@ import { applyAction, bossAlive, currentRadius, currentStepCost, emptyBag, onRif
 function stepToward(state: RunState, goal: Point) {
   const dist = distances(state.floor, goal);
   const { x, y } = state.player;
-  let best: Point | null = null, bestD = dist[idx(x, y)];
+  let best: Point | null = null, bestD = dist[idx(state.floor, x, y)];
   for (const d of [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }]) {
     const nx = x + d.x, ny = y + d.y;
     if (nx < 0 || ny < 0 || nx >= state.floor.w || ny >= state.floor.h) continue;
-    const v = dist[idx(nx, ny)];
+    const v = dist[idx(state.floor, nx, ny)];
     if (v >= 0 && v < bestD) { bestD = v; best = d; }
   }
   return best;
@@ -33,9 +34,9 @@ export function simulateRun(seed: number, flasks = 1, perks: Perks = NO_PERKS, g
   for (let turn = 0; turn < 2_000 && s.status === "playing"; turn++) {
     const cost = currentStepCost(s);
     const home = distances(s.floor, s.floor.spawn);
-    const backCost = home[idx(s.player.x, s.player.y)] * cost;
+    const backCost = home[idx(s.floor, s.player.x, s.player.y)] * cost;
     const reserve = backCost * greed + 6;
-    const stairsDist = distances(s.floor, s.floor.stairs)[idx(s.player.x, s.player.y)];
+    const stairsDist = distances(s.floor, s.floor.stairs)[idx(s.floor, s.player.x, s.player.y)];
 
     if (onStairs(s) && !bossAlive(s) && s.light > reserve + 45 * cost) { s = applyAction(s, { type: "descend" }); continue; }
     if (s.light <= reserve) {
@@ -46,7 +47,7 @@ export function simulateRun(seed: number, flasks = 1, perks: Perks = NO_PERKS, g
     }
     const fromHere = distances(s.floor, s.player);
     const target = s.floor.items
-      .map(i => ({ i, d: fromHere[idx(i.x, i.y)] }))
+      .map(i => ({ i, d: fromHere[idx(s.floor, i.x, i.y)] }))
       .filter(t => t.d > 0)
       .sort((a, b) => a.d - b.d)[0];
     const goal = target ? target.i : stairsDist > 0 ? s.floor.stairs : s.floor.spawn;
@@ -70,13 +71,13 @@ function knownDistances(state: RunState, from: Point) {
   const { floor } = state;
   const dist = new Array<number>(floor.w * floor.h).fill(-1);
   const queue: Point[] = [from];
-  dist[idx(from.x, from.y)] = 0;
+  dist[idx(floor, from.x, from.y)] = 0;
   for (let head = 0; head < queue.length; head++) {
     const p = queue[head];
     for (const d of DIRS4) {
       const nx = p.x + d.x, ny = p.y + d.y;
-      if (!isFloor(floor, nx, ny) || !floor.seen[idx(nx, ny)] || dist[idx(nx, ny)] !== -1) continue;
-      dist[idx(nx, ny)] = dist[idx(p.x, p.y)] + 1;
+      if (!isFloor(floor, nx, ny) || !floor.seen[idx(floor, nx, ny)] || dist[idx(floor, nx, ny)] !== -1) continue;
+      dist[idx(floor, nx, ny)] = dist[idx(floor, p.x, p.y)] + 1;
       queue.push({ x: nx, y: ny });
     }
   }
@@ -85,9 +86,9 @@ function knownDistances(state: RunState, from: Point) {
 
 function stepAlong(state: RunState, dist: number[]) {
   const { x, y } = state.player;
-  let best: Point | null = null, bestD = dist[idx(x, y)];
+  let best: Point | null = null, bestD = dist[idx(state.floor, x, y)];
   for (const d of DIRS4) {
-    const v = dist[idx(x + d.x, y + d.y)];
+    const v = dist[idx(state.floor, x + d.x, y + d.y)];
     if (v >= 0 && v < bestD) { bestD = v; best = d; }
   }
   return best;
@@ -109,13 +110,26 @@ export function simulateFogRun(seed: number, flasks = 1, perks: Perks = NO_PERKS
     const cost = currentStepCost(s);
     const known = knownDistances(s, s.player);
     const home = knownDistances(s, s.floor.spawn);
-    const backCost = Math.max(0, home[idx(s.player.x, s.player.y)]) * cost;
+    const backCost = Math.max(0, home[idx(s.floor, s.player.x, s.player.y)]) * cost;
     const reserve = backCost * greed + 6;
 
     const seenNow = visibleSet(s.floor, s.player, currentRadius(s));
-    for (const i of s.floor.items) if (seenNow.has(idx(i.x, i.y))) sawItems.add(i.id);
+    for (const i of s.floor.items) if (seenNow.has(idx(s.floor, i.x, i.y))) sawItems.add(i.id);
 
-    // An awake dimling next to us drinks light every turn; hit it instead of walking away.
+    // A creature that is winding up marks the tiles it will hit. A careful player steps off them, or strikes first.
+    const marked = new Set(s.floor.dimlings.filter(d => !d.boss && d.phase === "windup").flatMap(d => attackTiles(s.floor, d)).map(t => idx(s.floor, t.x, t.y)));
+    if (marked.has(idx(s.floor, s.player.x, s.player.y))) {
+      const occupied = new Set(s.floor.dimlings.flatMap(d => footprint(d).map(c => idx(s.floor, c.x, c.y))));
+      const escapes = DIRS4
+        .map(o => ({ o, x: s.player.x + o.x, y: s.player.y + o.y }))
+        .filter(({ x, y }) => isFloor(s.floor, x, y) && !marked.has(idx(s.floor, x, y)) && !occupied.has(idx(s.floor, x, y)))
+        .sort((a, b) => Math.max(0, home[idx(s.floor, a.x, a.y)]) - Math.max(0, home[idx(s.floor, b.x, b.y)]));
+      const winding = s.floor.dimlings.find(d => !d.boss && d.phase === "windup" && dimlingDistance(d, s.player) === 1);
+      // With a way out, take it; otherwise hit the creature that is next to us and about to strike.
+      if (escapes.length && !(winding && s.light > reserve && winding.hp <= s.weaponDamage + s.perks.damage)) { s = move(escapes[0].o); continue; }
+    }
+
+    // An awake creature next to us is best cut down before it strikes.
     const foe = s.floor.dimlings.find(d => d.awake && dimlingDistance(d, s.player) === 1);
     if (foe && s.light > reserve) {
       // Aim at the tile of the creature that touches us, which matters for the 2x2 boss.
@@ -123,7 +137,7 @@ export function simulateFogRun(seed: number, flasks = 1, perks: Perks = NO_PERKS
       s = move(touching); continue;
     }
 
-    const stairsKnown = s.floor.seen[idx(s.floor.stairs.x, s.floor.stairs.y)] === 1;
+    const stairsKnown = s.floor.seen[idx(s.floor, s.floor.stairs.x, s.floor.stairs.y)] === 1;
     if (onStairs(s) && !bossAlive(s) && s.light > reserve + 45 * cost) { s = applyAction(s, { type: "descend" }); continue; }
 
     const goHome = () => {
@@ -134,17 +148,17 @@ export function simulateFogRun(seed: number, flasks = 1, perks: Perks = NO_PERKS
     if (s.light <= reserve) { if (goHome()) break; continue; }
 
     const target = s.floor.items
-      .filter(i => sawItems.has(i.id) && known[idx(i.x, i.y)] > 0)
-      .sort((a, b) => known[idx(a.x, a.y)] - known[idx(b.x, b.y)])[0];
+      .filter(i => sawItems.has(i.id) && known[idx(s.floor, i.x, i.y)] > 0)
+      .sort((a, b) => known[idx(s.floor, a.x, a.y)] - known[idx(s.floor, b.x, b.y)])[0];
     if (target) { s = move(stepAlong(s, knownDistances(s, target))); continue; }
 
     let frontier: Point | null = null, best = Infinity;
     for (let y = 0; y < s.floor.h; y++) for (let x = 0; x < s.floor.w; x++) {
-      const d = known[idx(x, y)];
+      const d = known[idx(s.floor, x, y)];
       if (d <= 0 || d >= best) continue;
       const open = DIRS4.some(o => {
         const nx = x + o.x, ny = y + o.y;
-        return nx >= 0 && ny >= 0 && nx < s.floor.w && ny < s.floor.h && !s.floor.seen[idx(nx, ny)];
+        return nx >= 0 && ny >= 0 && nx < s.floor.w && ny < s.floor.h && !s.floor.seen[idx(s.floor, nx, ny)];
       });
       if (open) { best = d; frontier = { x, y }; }
     }

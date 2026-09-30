@@ -1,5 +1,9 @@
 import { footprint, idx, visibleSet, type Dimling, type FloorTheme, type Point } from "@/game/dungeon";
+import { attackTiles, windupProgress } from "@/game/enemy-ai";
+import { DEFAULT_SPECIES, enemyDef } from "@/game/enemies";
+import { ART_DOORWAYS } from "@/game/map-art";
 import { currentRadius, type RunState } from "@/game/run";
+import { enemyImage } from "./enemy-art";
 import { DIMLING, ICONS, drawMask, type Mask } from "./sprites";
 
 export const TILE = 32;
@@ -93,17 +97,16 @@ export type DrawOptions = {
   flip: boolean;
   playerPos: Point;
   view: View;
+  /** Screen pixels per logical pixel. Whole numbers keep the pixel art sharp. */
+  zoom: number;
 };
 
 /** Camera origin in tiles, centred on `focus` and clamped to the map. */
 export function cameraFor(focus: Point, mapW: number, mapH: number, viewW: number, viewH: number): View {
-  const clamp = (v: number, max: number) => Math.max(0, Math.min(max, v));
-  return {
-    x: clamp(focus.x + 0.5 - viewW / 2, mapW - viewW),
-    y: clamp(focus.y + 0.5 - viewH / 2, mapH - viewH),
-    w: viewW,
-    h: viewH,
-  };
+  // A map smaller than the view is centred; a bigger one follows the focus and stops at its edges.
+  const axis = (at: number, map: number, view: number) =>
+    view >= map ? (map - view) / 2 : Math.max(0, Math.min(map - view, at + 0.5 - view / 2));
+  return { x: axis(focus.x, mapW, viewW), y: axis(focus.y, mapH, viewH), w: viewW, h: viewH };
 }
 
 function hash(x: number, y: number) {
@@ -117,38 +120,6 @@ const TILE_ATLASES = new Map<string, HTMLCanvasElement>();
 const MAP_ART_IMAGES = new Map<number, HTMLImageElement>();
 const MAP_ART_CANVASES = new Map<string, HTMLCanvasElement>();
 const THEME_ORDER: FloorTheme[] = ["catacombs", "mycelium", "cinderworks", "hollowglass"];
-
-/** Some illustrated room links are drawn as solid masonry. Open only the tiles
- * used by the authored collision routes, borrowing nearby floor pixels. */
-const ART_DOORWAYS: Record<number, { x: number; y: number; w: number; h: number; sample: Point }[]> = {
-  1: [
-    { x: 8, y: 7, w: 1, h: 2, sample: { x: 9, y: 8 } },
-    { x: 17, y: 7, w: 1, h: 2, sample: { x: 16, y: 8 } },
-  ],
-  2: [
-    { x: 8, y: 6, w: 1, h: 2, sample: { x: 7, y: 7 } },
-    { x: 11, y: 6, w: 1, h: 2, sample: { x: 12, y: 7 } },
-    { x: 16, y: 6, w: 4, h: 2, sample: { x: 14, y: 8 } },
-  ],
-  3: [
-    { x: 9, y: 4, w: 1, h: 2, sample: { x: 8, y: 5 } },
-    { x: 17, y: 4, w: 1, h: 2, sample: { x: 16, y: 5 } },
-    { x: 6, y: 10, w: 2, h: 2, sample: { x: 8, y: 12 } },
-    { x: 19, y: 8, w: 1, h: 4, sample: { x: 20, y: 10 } },
-  ],
-  4: [
-    { x: 7, y: 7, w: 4, h: 2, sample: { x: 13, y: 8 } },
-    { x: 16, y: 7, w: 4, h: 2, sample: { x: 13, y: 8 } },
-  ],
-  5: [
-    { x: 9, y: 7, w: 3, h: 2, sample: { x: 13, y: 9 } },
-    { x: 16, y: 7, w: 3, h: 2, sample: { x: 13, y: 9 } },
-  ],
-  6: [
-    { x: 7, y: 7, w: 4, h: 2, sample: { x: 12, y: 10 } },
-    { x: 17, y: 7, w: 3, h: 2, sample: { x: 15, y: 10 } },
-  ],
-};
 
 /** Approved map illustrations are cached as one tile-sized canvas per floor. */
 function mapArtwork(depth: number, width: number, height: number) {
@@ -175,15 +146,6 @@ function mapArtwork(depth: number, width: number, height: number) {
   const drawH = Math.round(image.naturalHeight * scale);
   ctx.drawImage(image, Math.floor((canvas.width - drawW) / 2), Math.floor((canvas.height - drawH) / 2), drawW, drawH);
 
-  // The first floor's corridor was drawn two tiles high. Its collision route is
-  // three tiles high, so move the lower stone lip down and expose a floor row.
-  if (depth === 1) {
-    ctx.drawImage(canvas, 9 * TILE, 9 * TILE, 8 * TILE, TILE, 9 * TILE, 10 * TILE, 8 * TILE, TILE);
-    for (let x = 8; x <= 17; x++) {
-      const sampleX = Math.max(9, Math.min(16, x));
-      ctx.drawImage(canvas, sampleX * TILE, 8 * TILE, TILE, TILE, x * TILE, 9 * TILE, TILE, TILE);
-    }
-  }
   for (const door of ART_DOORWAYS[depth] ?? []) {
     for (let y = door.y; y < door.y + door.h; y++) {
       for (let x = door.x; x < door.x + door.w; x++) {
@@ -249,6 +211,72 @@ function drawCerberus(ctx: CanvasRenderingContext2D, d: Dimling, time: number, s
   ctx.textAlign = "center";
   ctx.fillStyle = "#000"; ctx.fillText("CERBERUS", ox + 33, oy - 13);
   ctx.fillStyle = "#ffd35a"; ctx.fillText("CERBERUS", ox + 32, oy - 14);
+}
+
+/**
+ * A creature: its picture standing on the tile, a health bar, and a bar that shows its attack. The attack bar is empty
+ * while it is idle, fills red as it winds up, and shows blue while it recovers and cannot strike.
+ */
+function drawCreature(ctx: CanvasRenderingContext2D, d: Dimling, time: number, still: boolean) {
+  const def = enemyDef(d.species ?? DEFAULT_SPECIES);
+  const image = enemyImage(d.species ?? DEFAULT_SPECIES);
+  const size = TILE * 1.6;
+  const cx = d.x * TILE + TILE / 2;
+  const foot = d.y * TILE + TILE - 1;
+  const phase = d.phase ?? "idle";
+  const bob = still || !d.awake ? 0 : Math.round(Math.sin(time / 230 + d.id) * 1.5);
+  const lunge = phase === "windup" && !still ? Math.round(Math.sin(time / 55) * 1.5) : 0;
+
+  ctx.fillStyle = "rgba(0,0,0,0.4)";
+  ctx.beginPath();
+  ctx.ellipse(cx, foot - 1, size * 0.3, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.save();
+  if (!d.awake) ctx.globalAlpha = 0.72;
+  else if (phase === "recovery") ctx.globalAlpha = 0.6;
+  if (image) {
+    // The pictures are large pixel art: smoothing keeps their detail when they are drawn small.
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(image, cx - size / 2 + lunge, foot - size * 0.9 + bob, size, size);
+    ctx.imageSmoothingEnabled = false;
+  } else {
+    drawMask(ctx, DIMLING[still ? 0 : Math.floor(time / 220 + d.id) % 2], d.x * TILE, d.y * TILE, 2, d.awake ? COLORS.dimling : "#6f6f80", false, "#000");
+  }
+  ctx.restore();
+
+  if (!d.awake) {
+    ctx.font = "8px Silkscreen, monospace";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#9aa0c8";
+    ctx.fillText("z", cx + 10, foot - size * 0.75 + (still ? 0 : Math.round(Math.sin(time / 500 + d.id) * 2)));
+  }
+  if (phase === "windup") {
+    ctx.font = "14px Silkscreen, monospace";
+    ctx.textAlign = "center";
+    const y = foot - size * 0.98 + bob;
+    ctx.fillStyle = "#000"; ctx.fillText("!", cx + 1, y + 1);
+    ctx.fillStyle = "#ff4a2a"; ctx.fillText("!", cx, y);
+  }
+
+  const w = 28;
+  const bx = cx - w / 2, by = foot + 2;
+  ctx.fillStyle = "#000"; ctx.fillRect(bx - 1, by - 1, w + 2, 5);
+  ctx.fillStyle = "#333"; ctx.fillRect(bx, by, w, 3);
+  ctx.fillStyle = COLORS.sigil; ctx.fillRect(bx, by, Math.max(1, Math.round(w * d.hp / d.maxHp)), 3);
+  if (d.awake) {
+    const ay = by + 5;
+    ctx.fillStyle = "#000"; ctx.fillRect(bx - 1, ay - 1, w + 2, 5);
+    ctx.fillStyle = "#333"; ctx.fillRect(bx, ay, w, 3);
+    const progress = windupProgress(d);
+    if (progress !== null) {
+      ctx.fillStyle = "#ff4a2a"; ctx.fillRect(bx, ay, Math.max(1, Math.round(w * progress)), 3);
+    } else if (phase === "recovery") {
+      ctx.fillStyle = "#5cc8ff"; ctx.fillRect(bx, ay, w, 3);
+    }
+  }
+  void def;
 }
 
 /** Small pre-rendered pixel tiles keep the detailed map cheap to redraw during movement. */
@@ -432,8 +460,9 @@ export function drawRun(ctx: CanvasRenderingContext2D, state: RunState, opts: Dr
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.imageSmoothingEnabled = false;
   ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, W, H);
-  ctx.translate(-Math.round(view.x * TILE), -Math.round(view.y * TILE));
+  ctx.fillRect(0, 0, W * opts.zoom, H * opts.zoom);
+  // Everything below is drawn in logical pixels; the zoom makes them whole screen pixels.
+  ctx.setTransform(opts.zoom, 0, 0, opts.zoom, -Math.round(view.x * TILE) * opts.zoom, -Math.round(view.y * TILE) * opts.zoom);
 
   const radius = currentRadius(state);
   const visible = visibleSet(floor, state.player, radius);
@@ -442,17 +471,17 @@ export function drawRun(ctx: CanvasRenderingContext2D, state: RunState, opts: Dr
   const litAtlas = tileAtlas(floor.theme, palette, true);
   const dimAtlas = tileAtlas(floor.theme, palette, false);
   const occupied = new Set<number>([
-    idx(floor.spawn.x, floor.spawn.y), idx(floor.stairs.x, floor.stairs.y),
-    ...floor.items.map(p => idx(p.x, p.y)), ...floor.dimlings.flatMap(d => footprint(d).map(p => idx(p.x, p.y))),
-    idx(opts.playerPos.x, opts.playerPos.y),
+    idx(floor, floor.spawn.x, floor.spawn.y), idx(floor, floor.stairs.x, floor.stairs.y),
+    ...floor.items.map(p => idx(floor, p.x, p.y)), ...floor.dimlings.flatMap(d => footprint(d).map(p => idx(floor, p.x, p.y))),
+    idx(floor, Math.round(opts.playerPos.x), Math.round(opts.playerPos.y)),
   ]);
-  const floorAt = (x: number, y: number) => x >= 0 && y >= 0 && x < floor.w && y < floor.h && floor.tiles[idx(x, y)] === 1;
+  const floorAt = (x: number, y: number) => x >= 0 && y >= 0 && x < floor.w && y < floor.h && floor.tiles[idx(floor, x, y)] === 1;
 
   const x0 = Math.max(0, Math.floor(view.x)), y0 = Math.max(0, Math.floor(view.y));
   const x1 = Math.min(floor.w - 1, Math.ceil(view.x + view.w)), y1 = Math.min(floor.h - 1, Math.ceil(view.y + view.h));
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
-      const k = idx(x, y);
+      const k = idx(floor, x, y);
       if (!floor.seen[k]) continue;
       const lit = visible.has(k);
       const px = x * TILE, py = y * TILE;
@@ -486,17 +515,17 @@ export function drawRun(ctx: CanvasRenderingContext2D, state: RunState, opts: Dr
     }
   }
 
-  const showAt = (p: Point) => floor.seen[idx(p.x, p.y)] && (visible.has(idx(p.x, p.y)) || floor.revealed);
+  const showAt = (p: Point) => floor.seen[idx(floor, p.x, p.y)] && (visible.has(idx(floor, p.x, p.y)) || floor.revealed);
   const iconAt = (p: Point, mask: Mask, color: string) =>
     drawMask(ctx, mask, p.x * TILE + 4, p.y * TILE + 4, 3, color, false, "#000");
 
-  if (floor.seen[idx(floor.spawn.x, floor.spawn.y)]) {
+  if (floor.seen[idx(floor, floor.spawn.x, floor.spawn.y)]) {
     const pulse = opts.reducedMotion ? 1 : 0.75 + 0.25 * Math.sin(opts.time / 300);
     ctx.globalAlpha = pulse;
     iconAt(floor.spawn, ICONS.rift, COLORS.lime);
     ctx.globalAlpha = 1;
   }
-  if (floor.seen[idx(floor.stairs.x, floor.stairs.y)]) iconAt(floor.stairs, ICONS.stairs, COLORS.white);
+  if (floor.seen[idx(floor, floor.stairs.x, floor.stairs.y)]) iconAt(floor.stairs, ICONS.stairs, COLORS.white);
 
   for (const item of floor.items) {
     if (!showAt(item)) continue;
@@ -504,18 +533,35 @@ export function drawRun(ctx: CanvasRenderingContext2D, state: RunState, opts: Dr
     ctx.drawImage(itemSprite(item.kind, floor.theme), item.x * TILE, item.y * TILE + bob, TILE, TILE);
   }
 
+  // The tiles a creature is about to hit are marked in red, brighter the closer the blow.
   for (const d of floor.dimlings) {
-    if (!footprint(d).some(c => visible.has(idx(c.x, c.y)))) continue;
+    if (d.boss || d.phase !== "windup") continue;
+    const creatureSeen = visible.has(idx(floor, d.x, d.y));
+    const progress = windupProgress(d) ?? 0;
+    const pulse = opts.reducedMotion ? 0 : Math.sin(opts.time / 85) * 0.07;
+    for (const t of attackTiles(floor, d)) {
+      if (!creatureSeen && !visible.has(idx(floor, t.x, t.y))) continue;
+      ctx.fillStyle = `rgba(255,50,40,${0.2 + 0.28 * progress + pulse})`;
+      ctx.fillRect(t.x * TILE, t.y * TILE, TILE, TILE);
+      ctx.strokeStyle = `rgba(255,110,80,${0.55 + 0.4 * progress})`;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(t.x * TILE + 1, t.y * TILE + 1, TILE - 2, TILE - 2);
+      ctx.strokeStyle = `rgba(255,220,200,${0.25 + 0.3 * progress})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(t.x * TILE + 5, t.y * TILE + 5); ctx.lineTo(t.x * TILE + TILE - 5, t.y * TILE + TILE - 5);
+      ctx.moveTo(t.x * TILE + TILE - 5, t.y * TILE + 5); ctx.lineTo(t.x * TILE + 5, t.y * TILE + TILE - 5);
+      ctx.stroke();
+    }
+  }
+
+  for (const d of floor.dimlings) {
+    if (!footprint(d).some(c => visible.has(idx(floor, c.x, c.y)))) continue;
     if (d.boss) {
       drawCerberus(ctx, d, opts.time, opts.reducedMotion);
       continue;
     }
-    const frame = opts.reducedMotion ? 0 : Math.floor(opts.time / 220 + d.id) % 2;
-    drawMask(ctx, DIMLING[frame], d.x * TILE, d.y * TILE, 2, d.awake ? COLORS.dimling : "#6f6f80", false, "#000");
-    // Health is a bar that scales to the creature, so 16 HP and 40 HP fit the same tile.
-    ctx.fillStyle = "#000"; ctx.fillRect(d.x * TILE + 3, d.y * TILE + 27, 26, 5);
-    ctx.fillStyle = "#333"; ctx.fillRect(d.x * TILE + 4, d.y * TILE + 28, 24, 3);
-    ctx.fillStyle = COLORS.sigil; ctx.fillRect(d.x * TILE + 4, d.y * TILE + 28, Math.max(1, Math.round(24 * d.hp / d.maxHp)), 3);
+    drawCreature(ctx, d, opts.time, opts.reducedMotion);
   }
 
   const pp = opts.playerPos;

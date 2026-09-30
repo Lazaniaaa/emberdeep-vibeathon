@@ -35,7 +35,8 @@ Other delvers wander the camp with name tags and chatter, and Old Ember by the g
 
 1. **Get in.** A descent needs an **entry key** (50 RF). New saves start with three.
 2. **Fill your lantern.** Buy oil flasks at camp (20 RF each, 80 light per flask).
-3. **Descend.** Floors 1-7 have hand-traced layouts with painted art, deeper floors are generated, and all of them sit under fog of war. Every step
+3. **Descend.** The descent fills the whole screen like the camp. Floors 1-7 have hand-traced layouts with painted art
+   (floors 1-3 are 60% larger than the rest), deeper floors are generated, and all of them sit under fog of war. Every step
    burns light, and less light means a smaller circle of vision.
 4. **Push or pull out.** Deeper floors multiply loot (+40% per depth) but each step burns
    more light. Walk back to the rift you arrived through to extract.
@@ -51,12 +52,17 @@ Other delvers wander the camp with name tags and chatter, and Old Ember by the g
 9. **Expedition (optional).** Send a Delver away for about $1 (100 RF) plus an optional pack. It comes back with a
    random haul of keys, tickets and gold, or with nothing. See [Expeditions](#expeditions).
 
-Dimlings wander the deep and drink your light when they're next to you. Bump into one to
-attack it; your weapon decides how many swings it takes.
+**Creatures.** Nine kinds of creature live in the deep (Wickgnaw, Snaretoad, Cinder Hound, Chaincoil,
+Needle Wraith, Sootplate, Hollow Burrower, Fourfold Bell, Rift Leaper), with more of them the deeper you go:
+six on depth 1, one more each depth. They hit back, but never without warning. A creature that reaches you
+*winds up*: the tiles its blow will hit turn red (a line for some, a cross around it for others) for one or two
+turns. Step off the red tiles and the blow lands on nothing, and the creature is left open for a turn. Stay on
+them and the blow drinks your light. Bump into a creature to attack it; your weapon decides how many swings it
+takes. Kills drop a little gold.
 
-Depth 7 ends in an arena guarded by **Cerberus**, a three-headed hound four times the size of a dimling
-(2x2 tiles, 150 HP, where an ordinary dimling has 16-40). It seals the stairs, drinks 8 light a turn and
-moves at half a dimling's pace. When it falls it leaves a **Cerberus Hoard** chest where it stood: gold and
+Depth 7 ends in an arena guarded by **Cerberus**, a three-headed hound four times the size of a creature
+(2x2 tiles, 150 HP, where ordinary creatures have 12-70). It seals the stairs, drinks 8 light a turn when you
+touch it, never winds up, and moves at half a creature's pace. When it falls it leaves a **Cerberus Hoard** chest where it stood: gold and
 crystals, a Healing Draught, a Rage Potion and a 40% chance of a Soul Sigil. Walk over the chest to open it.
 The stairs then open onto the endless floors below; you can also skip the fight and leave through the rift.
 A Ward Charm makes Cerberus harmless for 15 steps, enough for a Rusty Dagger to take about ten swings.
@@ -91,15 +97,16 @@ A Ward Charm makes Cerberus harmless for 15 steps, enough for a Rusty Dagger to 
 - `src/game/sim.ts` has two bots: one that sees the whole map and one that plays under fog of
   war. Both almost never die, so they are an **upper bound** on skilled play, not a forecast.
   A 2-flask delver with no perks banks about 1.9 gold per RF spent (key included). The
-  simulated crowd banks 2.3, the average of the 70/20/10 crowd of unperked, blessed and top-build bots
-  that the simulation uses, so a lone delver in the demo is measured against a crowd with good gear.
-  Real players make mistakes and die, so the true figure is probably lower; the cap covers that case.
+  simulated crowd banks 1.8, a bit below the average (about 2.2) of the 70/20/10 crowd of unperked, blessed and
+  top-build bots that the simulation uses, so a lone delver in the demo is measured against a crowd with good gear.
+  The bots step off every marked tile and almost never die; real players make mistakes and die, so the true figure is
+  probably lower, and the cap covers that case.
 - Because everything is shared out, the round pool never pays back more than its share (60%) of
   what was spent. Balance is therefore about who takes it. Against the demo's crowd an unperked
-  delver gets about 51% of their spend back, and the strongest build (Legendary Pathfinder +
-  Hoverer + Friend's Blessing, 3 flasks) about 121% (+21%) while merely held, 141% (+41%) once it has been
-  locked for 10+ rounds and 151% (+51%) with a full stake, funded by the others. The 160% cap stops
-  anything above that. The edge shrinks as more players use it (about 85% when half the crowd runs the locked build). `npm run economy` regenerates the tables, including how the
+  delver gets about 63% of their spend back, and the strongest build (Legendary Pathfinder +
+  Hoverer + Friend's Blessing, 3 flasks) about 126% (+26%) while merely held, 146% (+46%) once it has been
+  locked for 10+ rounds and 156% (+56%) with a full stake, funded by the others. The 160% cap stops
+  anything above that. The edge shrinks as more players use it (about 80% when half the crowd runs the locked build). `npm run economy` regenerates the tables, including how the
   results move with the crowd's skill and size and what locks farm:
   [docs/economy-report.md](docs/economy-report.md).
 - Step discounts (Pathfinder, Hoverer) act like extra light, so their total is capped at 40%.
@@ -114,7 +121,7 @@ result and "Friends you won" show them automatically; without any, a tinted port
 at a simulated ask of 500 RF. The lot opens only when it can buy **two**, and it caps at
 **five**. One Friend is burned. The rest are drawn. Leftover RF rolls to the next week.
 
-Tickets are not sold. Gold, crystals, chests, vaults and dimling kills drop one 3% of the
+Tickets are not sold. Gold, crystals, chests, vaults and creature kills drop one 3% of the
 time. You only keep a ticket if you extract; dying leaves it in the dark. A weekly pass
 raises that rate and is itself spent through the 25/8/67 split:
 
@@ -210,13 +217,13 @@ Every item has its own picture in the Armory, the gate and the potion bar.
 | Rusty Dagger | 60 RF | 16 damage |
 | Iron Sword | 150 RF + 20 crystals | 24 damage |
 | Emberblade | 400 RF + 60 crystals | 40 damage, +4 light per kill |
-| Leather Vest | 80 RF + 10 crystals | Dimlings drain 15% less |
-| Chain Mail | 220 RF + 30 crystals | Dimlings drain 30% less |
-| Emberplate | 520 RF + 70 crystals | Dimlings drain 45% less |
+| Leather Vest | 80 RF + 10 crystals | Creatures drain 15% less |
+| Chain Mail | 220 RF + 30 crystals | Creatures drain 30% less |
+| Emberplate | 520 RF + 70 crystals | Creatures drain 45% less |
 | Night Vision | 30 RF or 12 crystals | Triggers automatically when your light dies: 25 more steps |
 | Oil Vial | 15 RF or 6 crystals | +30 light |
 | Flare | 25 RF or 10 crystals | Reveals the whole floor |
-| Ward Charm | 25 RF or 10 crystals | Dimlings can't drain you for 15 steps |
+| Ward Charm | 25 RF or 10 crystals | Creatures' blows and Cerberus can't drain you for 15 steps |
 | Rage Potion | 40 RF or 16 crystals | +80% damage on your next 5 blows |
 | Regeneration | 10 RF or 4 crystals | +1 light on each of the next 5 turns |
 | **Healing Draught** | **not sold** | +60 light at once. Drops only in chests, Sealed Vaults and the Cerberus Hoard, and is lost if you do not extract |
@@ -239,8 +246,8 @@ Family perks are shown at full strength; holding gives 60% of them and locking u
 
 | Family | Perk |
 | --- | --- |
-| Skeleton | Dimlings drain 50% less |
-| Mask | Dimlings don't notice you until adjacent |
+| Skeleton | Creatures drain 50% less |
+| Mask | Creatures don't notice you until adjacent |
 | Family | +25% gold |
 | Cellular | Regrows 1 light every 8 steps |
 | Asymmetry | 20% of steps are free |
@@ -269,6 +276,7 @@ npm run typecheck
 npm run lint
 npm run build      # static site in dist/ (relative paths, host anywhere)
 node scripts/optimize-maps.mjs  # rebuild public/maps/*.webp from the originals in art-src/maps
+node scripts/optimize-enemies.mjs  # rebuild public/enemies/*.webp from the originals in art-src/enemies
 npm run economy    # regenerate docs/economy-report.md (about a minute, deterministic)
 npm run smoke      # headless browser pass; needs `npx playwright install chromium` and a running dev server
 ```
@@ -296,7 +304,7 @@ The build in `dist/` is a plain static site. `deploy/README.md` walks through ho
 ## Stack
 
 Vite, React 19, TypeScript, Tailwind CSS v4, shadcn/ui (Base UI), zustand, viem and Vitest.
-The game is rendered on a canvas. The camp, items, portraits and monsters are pixel art drawn in code; the seven dungeon floors use painted WebP art.
+The game is rendered on a canvas. The camp, items and portraits are pixel art drawn in code; the seven dungeon floors and the nine creatures use painted WebP art.
 
 ## Integration notes for an on-chain phase
 

@@ -17,6 +17,8 @@ const CUES: Partial<Record<RunEvent | "buy" | "mint" | "burn", Cue[]>> = {
   boss: [196, 262, 330, 392, 523, 659].map((f, i) => ({ freq: f, dur: 0.2, type: "sawtooth" as const, gain: 0.05, delay: i * 0.08 })),
   hoard: [262, 330, 392, 523, 659, 784, 1047].map((f, i) => ({ freq: f, dur: 0.16, type: "square" as const, gain: 0.05, delay: i * 0.07 })),
   sealed: [{ freq: 110, dur: 0.08, type: "square", gain: 0.04 }, { freq: 82, dur: 0.14, type: "square", gain: 0.04, delay: 0.09 }],
+  warn: [{ freq: 520, dur: 0.05, type: "square", gain: 0.03 }, { freq: 520, dur: 0.05, type: "square", gain: 0.03, delay: 0.09 }],
+  miss: [{ freq: 700, to: 300, dur: 0.1, type: "triangle", gain: 0.035 }],
   drain: [{ freq: 160, to: 70, dur: 0.2, type: "sine", gain: 0.06 }],
   descend: [{ freq: 400, to: 120, dur: 0.4, type: "triangle", gain: 0.06 }],
   potion: [{ freq: 500, to: 900, dur: 0.15, type: "sine", gain: 0.05 }],

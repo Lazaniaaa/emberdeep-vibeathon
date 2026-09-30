@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowDown, DoorOpen, Gem, Moon, Shield, Stars } from "lucide-react";
+import { ArrowDown, DoorOpen, Gem, Moon, Shield, Ticket, Stars } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ItemArt } from "@/components/art";
 import { DPad } from "@/components/dpad";
+import { Header } from "@/components/header";
 import { MOVE_KEYS as KEYS, MOVE_MS } from "@/lib/controls";
 import { playSfx } from "@/audio/sfx";
 import { lootMultiplier } from "@/game/config";
@@ -12,6 +13,7 @@ import { roundShare } from "@/game/economy";
 import { bossAlive, currentRadius, currentStepCost, onRift, onStairs, type RunAction, type RunState } from "@/game/run";
 import { percent } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { preloadEnemies } from "@/render/enemy-art";
 import { COLORS, TILE, cameraFor, drawRun, type View } from "@/render/renderer";
 import { settle, useRun } from "@/state/run-store";
 import { holdRunLock } from "@/state/run-lock";
@@ -19,6 +21,15 @@ import { useGame } from "@/state/store";
 import { useWallet } from "@/state/wallet";
 import { resolveHero, type HeroVisual } from "./hero-info";
 
+type Screen = { w: number; h: number };
+
+/** Whole-number zoom, so at least about 14 x 9 tiles fit: enough to see a creature wind up and step aside. */
+function runZoom(screen: Screen) {
+  const fit = Math.floor(Math.min(screen.w / (14 * TILE), screen.h / (9 * TILE)));
+  return Math.max(1, Math.min(4, fit));
+}
+
+/** The descent fills the screen, like the camp: the cave is the picture and everything else floats over it. */
 export function RunView() {
   const run = useRun(s => s.run)!;
   const act = useRun(s => s.act);
@@ -27,14 +38,29 @@ export function RunView() {
   const wallet = useWallet();
   const hero = resolveHero(game.hero, game.heroes, wallet.selected, wallet.sprite, game.prizes);
   const [shake, setShake] = useState(0);
+  const [hurt, setHurt] = useState(0);
   const lastKey = useRef(0);
+  const root = useRef<HTMLDivElement>(null);
+  const [screen, setScreen] = useState<Screen>({ w: 1280, h: 720 });
+
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    const measure = () => setScreen({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => { preloadEnemies(); }, []);
 
   const dispatch = useCallback((action: RunAction) => {
     const next = act(action);
     if (!next) return;
     const muted = useGame.getState().muted;
     for (const e of new Set(next.events)) playSfx(e, muted);
-    if (next.events.includes("drain") && !useGame.getState().reducedMotion) setShake(s => s + 1);
+    if (next.events.includes("drain") && !useGame.getState().reducedMotion) { setShake(s => s + 1); setHurt(h => h + 1); }
   }, [act]);
 
   const contextAction = useCallback(() => {
@@ -77,100 +103,113 @@ export function RunView() {
   // The result is already banked when the descent ends, so this only closes the screen.
   const finish = () => clear();
 
+  const zoom = runZoom(screen);
+  const view: View = { x: 0, y: 0, w: Math.ceil(screen.w / (TILE * zoom)), h: Math.ceil(screen.h / (TILE * zoom)) };
   const share = roundShare(game.roundGold + run.gold, game.fieldGold);
   const lightPct = Math.min(100, (run.light / Math.max(1, run.startLight)) * 100);
   const nightVision = run.light <= 0 && run.nightVision > 0;
   const atStairs = onStairs(run), atRift = onRift(run);
   const sealed = bossAlive(run);
+  const playing = run.status === "playing";
+  const windingUp = run.floor.dimlings.some(d => !d.boss && d.phase === "windup");
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
-      <div className="space-y-3">
-        <div key={shake} className={cn("relative overflow-hidden rounded-xl border border-white/10 bg-black", shake > 0 && "animate-[shake_180ms_ease-in-out]")}>
-          <GameCanvas run={run} hero={hero} reducedMotion={game.reducedMotion} onMove={(dx, dy) => dispatch({ type: "move", dx, dy })} />
-          {run.status !== "playing" && (
-            <div className="absolute inset-0 grid place-items-center bg-black/75 p-4 backdrop-blur-[2px]">
-              <div className="max-w-sm space-y-3 text-center">
-                <div className={cn("font-pixel text-2xl", run.status === "extracted" ? "text-lime" : "text-destructive")}>
-                  {run.status === "extracted" ? "Extracted" : "Lost in the dark"}
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  {run.status === "extracted"
-                    ? `You made it home from depth ${run.deepest} with ${run.gold} gold. It joins this round's pool share.`
-                    : `The deep keeps your ${run.gold} gold. It counts for nobody, so the pool is split among the delvers who made it home.`}
-                </p>
-                <Button size="lg" className="font-pixel" onClick={finish} autoFocus>Return to camp</Button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          {atStairs && run.status === "playing" && !sealed && (
-            <Button className="font-pixel" onClick={contextAction}><ArrowDown data-icon="inline-start" /> Descend to depth {run.depth + 1} <Kbd>E</Kbd></Button>
-          )}
-          {atStairs && run.status === "playing" && sealed && (
-            <p className="text-xs text-sigil">The stairs are sealed. Defeat Cerberus, or walk back to the rift and leave with your loot.</p>
-          )}
-          {atRift && run.status === "playing" && (
-            <Button className="font-pixel" variant="secondary" onClick={contextAction}><DoorOpen data-icon="inline-start" /> Extract with {run.gold} gold <Kbd>E</Kbd></Button>
-          )}
-          {!atStairs && !atRift && run.status === "playing" && (
-            <p className="text-xs text-muted-foreground">
-              {sealed && <><span className="text-sigil">Cerberus</span> guards the stairs. A Ward Charm makes its drain harmless for 15 steps. </>}
-              Find the <span className="text-foreground">stairs</span> to go deeper, or walk back to the <span className="text-lime">rift</span> to extract.
-              <span className="hidden md:inline"> Move: WASD / arrows · Wait: Space · Act: E · Potions: 1-7</span>
-            </p>
-          )}
-        </div>
-
-        <DPad disabled={run.status !== "playing"} onMove={(dx, dy) => dispatch({ type: "move", dx, dy })} onWait={() => dispatch({ type: "wait" })} />
+    <div ref={root} className="fixed inset-0 overflow-hidden bg-black text-white">
+      <div key={shake} className={cn("absolute inset-0", shake > 0 && "animate-[shake_180ms_ease-in-out]")}>
+        <GameCanvas run={run} hero={hero} reducedMotion={game.reducedMotion} view={view} zoom={zoom}
+          onMove={(dx, dy) => dispatch({ type: "move", dx, dy })} />
       </div>
+      {hurt > 0 && <div key={`hurt-${hurt}`} aria-hidden className="pointer-events-none absolute inset-0 z-10 animate-[hurt_450ms_ease-out_forwards]" />}
 
-      <aside className="space-y-3">
-        <section className="rounded-xl border border-white/10 bg-card p-4" aria-label="Lantern">
+      <Header overlay />
+
+      {/* Light and loot */}
+      <div className="pointer-events-none absolute top-14 left-3 z-20 flex w-[13.5rem] flex-col gap-2 sm:top-[4.25rem] sm:w-64">
+        <section className="rounded-xl border border-white/20 bg-[#150c2b]/85 px-3 py-2 backdrop-blur-sm" aria-label="Lantern">
           <div className="flex items-baseline justify-between">
             <span className="text-[10px] tracking-wider text-muted-foreground uppercase">Light</span>
             <span className={cn("font-pixel text-2xl", run.light < 15 ? "text-destructive" : "text-lime")} aria-live="polite">{Math.ceil(run.light)}</span>
           </div>
-          <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10" role="progressbar" aria-valuenow={Math.round(lightPct)} aria-valuemin={0} aria-valuemax={100} aria-label="Light remaining">
+          <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-white/10" role="progressbar" aria-valuenow={Math.round(lightPct)} aria-valuemin={0} aria-valuemax={100} aria-label="Light remaining">
             <div className="h-full rounded-full bg-lime transition-[width]" style={{ width: `${lightPct}%`, boxShadow: `0 0 10px ${COLORS.lime}` }} />
           </div>
-          <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+          <div className="mt-1.5 flex flex-wrap gap-1 text-[10px]">
             <Badge variant="outline">Radius {currentRadius(run)}</Badge>
             <Badge variant="outline">-{currentStepCost(run).toFixed(2)}/step</Badge>
-            <Badge variant="outline" className="text-sigil">Tickets {run.tickets}</Badge>
             {nightVision && <Badge className="bg-emerald-400 text-black"><Moon /> Night vision {run.nightVision}</Badge>}
             {run.ward > 0 && <Badge className="bg-crystal text-black"><Shield /> Ward {run.ward}</Badge>}
             {(run.rage ?? 0) > 0 && <Badge className="bg-red-500 text-white">Rage {run.rage}</Badge>}
             {(run.regen ?? 0) > 0 && <Badge className="bg-emerald-500 text-black">Regen {run.regen}</Badge>}
           </div>
         </section>
-
-        <section className="grid grid-cols-3 gap-2 rounded-xl border border-white/10 bg-card p-3 text-center" aria-label="Loot this run">
-          <Loot label="Depth" value={run.depth} sub={`x${lootMultiplier(run.depth).toFixed(1)} loot`} />
-          <Loot label="Gold" value={run.gold} sub={`round share ${percent(share)}`} color="text-gold" />
-          <Loot label="Crystals" value={run.crystals} sub={run.sigils ? `${run.sigils} sigil${run.sigils > 1 ? "s" : ""}` : "\u00a0"} color="text-crystal" icon={<Gem className="size-3" />} />
+        <section className="grid grid-cols-4 gap-1 rounded-xl border border-white/20 bg-[#150c2b]/85 px-2 py-1.5 text-center backdrop-blur-sm" aria-label="Loot this run">
+          <Loot label="Depth" value={run.depth} sub={`x${lootMultiplier(run.depth).toFixed(1)}`} />
+          <Loot label="Gold" value={run.gold} sub={percent(share)} color="text-gold" />
+          <Loot label="Crystals" value={run.crystals} sub={run.sigils ? `${run.sigils} sigil${run.sigils > 1 ? "s" : ""}` : " "} color="text-crystal" icon={<Gem className="size-3" />} />
+          <Loot label="Tickets" value={run.tickets} sub={" "} color="text-sigil" icon={<Ticket className="size-3" />} />
         </section>
+      </div>
 
-        <section className="grid grid-cols-2 gap-2" aria-label="Potions">
-          {POTION_IDS.filter(id => POTIONS[id].shop || run.bag[id] > 0).map(id => (
-            <PotionButton key={id} id={id} run={run} onUse={() => dispatch({ type: "potion", id })} />
-          ))}
-        </section>
+      {/* Potions */}
+      <section className="absolute top-14 right-3 z-20 grid grid-cols-1 gap-1.5 sm:top-[4.25rem] sm:grid-cols-2" aria-label="Potions">
+        {POTION_IDS.filter(id => POTIONS[id].shop || run.bag[id] > 0).map(id => (
+          <PotionButton key={id} id={id} run={run} onUse={() => dispatch({ type: "potion", id })} />
+        ))}
+      </section>
 
-        <section className="rounded-xl border border-white/10 bg-card p-3" aria-label="Log">
-          <ul className="space-y-1 text-xs" aria-live="polite">
-            {run.messages.map((m, i) => (
+      {/* Actions, warnings and the log share one stack, so nothing sits on the touch pad */}
+      <div className="pointer-events-none absolute bottom-3 left-3 z-20 flex w-[calc(100%-10.5rem)] max-w-[26rem] flex-col gap-1.5 sm:bottom-4 lg:w-[26rem]">
+        <div className="pointer-events-auto flex flex-col items-start gap-1.5">
+          {atStairs && playing && !sealed && (
+            <Button size="lg" className="font-pixel shadow-lg" onClick={contextAction}><ArrowDown data-icon="inline-start" /> Descend to depth {run.depth + 1} <Kbd>E</Kbd></Button>
+          )}
+          {atStairs && playing && sealed && (
+            <p className="rounded-lg border border-sigil/50 bg-[#150c2b]/90 px-3 py-1.5 text-xs text-sigil">The stairs are sealed. Defeat Cerberus, or walk back to the rift and leave with your loot.</p>
+          )}
+          {atRift && playing && (
+            <Button size="lg" className="font-pixel shadow-lg" variant="secondary" onClick={contextAction}><DoorOpen data-icon="inline-start" /> Extract with {run.gold} gold <Kbd>E</Kbd></Button>
+          )}
+          {!atStairs && !atRift && playing && sealed && (
+            <p className="rounded-lg border border-white/15 bg-black/60 px-3 py-1.5 text-xs text-muted-foreground backdrop-blur-sm"><span className="text-sigil">Cerberus</span> guards the stairs. A Ward Charm makes its drain harmless for 15 steps.</p>
+          )}
+        </div>
+        {windingUp && playing && (
+          <p className="rounded-lg border border-red-400/60 bg-red-950/80 px-2.5 py-1.5 text-xs text-red-100 backdrop-blur-sm">
+            Red tiles are about to be hit. Step off them.
+          </p>
+        )}
+        <section className="rounded-xl border border-white/15 bg-black/60 px-3 py-2 backdrop-blur-sm" aria-label="Log">
+          <ul className="space-y-0.5 text-xs" aria-live="polite">
+            {run.messages.slice(0, 3).map((m, i) => (
               <li key={`${run.steps}-${i}`} className={i === 0 ? "text-foreground" : "text-muted-foreground"}>{m}</li>
             ))}
           </ul>
+          <p className="mt-1 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+            <Stars className="size-3" /> Playing as <span style={{ color: hero.color }}>{hero.name}</span>
+            <span className="hidden md:inline"> · Move: WASD / arrows · Wait: Space · Act: E · Potions: 1-7</span>
+          </p>
         </section>
+      </div>
 
-        <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <Stars className="size-3" /> Playing as <span style={{ color: hero.color }}>{hero.name}</span>
-        </p>
-      </aside>
+      <div className="absolute right-3 bottom-4 z-20 opacity-90 lg:hidden">
+        <DPad compact disabled={!playing} onMove={(dx, dy) => dispatch({ type: "move", dx, dy })} onWait={() => dispatch({ type: "wait" })} />
+      </div>
+
+      {!playing && (
+        <div className="absolute inset-0 z-40 grid place-items-center bg-black/75 p-4 backdrop-blur-[2px]">
+          <div className="max-w-sm space-y-3 text-center">
+            <div className={cn("font-pixel text-2xl", run.status === "extracted" ? "text-lime" : "text-destructive")}>
+              {run.status === "extracted" ? "Extracted" : "Lost in the dark"}
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {run.status === "extracted"
+                ? `You made it home from depth ${run.deepest} with ${run.gold} gold. It joins this round's pool share.`
+                : `The deep keeps your ${run.gold} gold. It counts for nobody, so the pool is split among the delvers who made it home.`}
+            </p>
+            <Button size="lg" className="font-pixel" onClick={finish} autoFocus>Return to camp</Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -182,9 +221,9 @@ function Kbd({ children }: { children: React.ReactNode }) {
 function Loot({ label, value, sub, color, icon }: { label: string; value: number; sub: string; color?: string; icon?: React.ReactNode }) {
   return (
     <div>
-      <div className="text-[10px] tracking-wider text-muted-foreground uppercase">{label}</div>
-      <div className={cn("flex items-center justify-center gap-1 font-pixel text-lg", color)}>{icon}{value}</div>
-      <div className="text-[10px] text-muted-foreground">{sub}</div>
+      <div className="text-[9px] tracking-wider text-muted-foreground uppercase">{label}</div>
+      <div className={cn("flex items-center justify-center gap-0.5 font-pixel text-base", color)}>{icon}{value}</div>
+      <div className="text-[9px] text-muted-foreground">{sub}</div>
     </div>
   );
 }
@@ -195,23 +234,22 @@ function PotionButton({ id, run, onUse }: { id: PotionId; run: RunState; onUse: 
   const active = (id === "nightVision" && run.nightVision > 0) || (id === "rage" && (run.rage ?? 0) > 0) || (id === "regen" && (run.regen ?? 0) > 0);
   const blocked = run.status !== "playing" || count <= 0 || active;
   return (
-    <Button variant="outline" className="h-auto justify-start gap-2 px-2.5 py-2 text-left" onClick={onUse} disabled={blocked} title={p.blurb}>
+    <Button variant="outline" className="h-auto justify-start gap-1.5 border-white/20 bg-[#150c2b]/85 px-2 py-1.5 text-left backdrop-blur-sm" onClick={onUse} disabled={blocked} title={p.blurb}
+      aria-label={`${p.name}, ${count} left, key ${p.key}`}>
       <ItemArt id={id} px={2} />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-xs">{p.name}</span>
-        <span className="block text-[10px] text-muted-foreground">×{count} · key {p.key}</span>
+        <span className="hidden truncate text-[11px] sm:block">{p.name}</span>
+        <span className="block text-[10px] text-muted-foreground">×{count}<span className="hidden sm:inline"> · key {p.key}</span></span>
       </span>
     </Button>
   );
 }
 
-function GameCanvas({ run, hero, reducedMotion, onMove }: {
-  run: RunState; hero: HeroVisual; reducedMotion: boolean; onMove: (dx: number, dy: number) => void;
+function GameCanvas({ run, hero, reducedMotion, view: viewSize, zoom, onMove }: {
+  run: RunState; hero: HeroVisual; reducedMotion: boolean; view: View; zoom: number; onMove: (dx: number, dy: number) => void;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const [compact, setCompact] = useState(false);
-  const viewSize = compact ? { w: 11, h: 11 } : { w: run.floor.w, h: run.floor.h };
-  const camera = useRef<View>({ x: 0, y: 0, ...viewSize });
+  const camera = useRef<View>({ x: 0, y: 0, w: viewSize.w, h: viewSize.h });
   const live = useRef({ run, hero, reducedMotion });
   useEffect(() => { live.current = { run, hero, reducedMotion }; });
   const tween = useRef({ from: { x: run.player.x, y: run.player.y }, to: { x: run.player.x, y: run.player.y }, at: 0, depth: run.depth });
@@ -223,14 +261,6 @@ function GameCanvas({ run, hero, reducedMotion, onMove }: {
     const teleport = run.depth !== t.depth || Math.abs(p.x - t.to.x) + Math.abs(p.y - t.to.y) > 1;
     tween.current = { from: teleport ? { ...p } : { ...t.to }, to: { x: p.x, y: p.y }, at: performance.now(), depth: run.depth };
   }, [run]);
-
-  useEffect(() => {
-    const canvas = ref.current;
-    if (!canvas?.parentElement) return;
-    const ro = new ResizeObserver(([entry]) => setCompact(entry.contentRect.width < 640));
-    ro.observe(canvas.parentElement);
-    return () => ro.disconnect();
-  }, []);
 
   useEffect(() => {
     const canvas = ref.current;
@@ -257,20 +287,20 @@ function GameCanvas({ run, hero, reducedMotion, onMove }: {
         : hero.mask(facing, walking, animFrame);
       const view = cameraFor(pos, run.floor.w, run.floor.h, viewW, viewH);
       camera.current = view;
-      drawRun(ctx, run, { time, reducedMotion, heroMask: mask, flip: hero.mirrored && facing === "left", playerPos: pos, view });
+      drawRun(ctx, run, { time, reducedMotion, heroMask: mask, flip: hero.mirrored && facing === "left", playerPos: pos, view, zoom });
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
-    // The loop reads live state from refs; only a view-size change needs a restart.
+    // The loop reads live state from refs; only a change of view size or zoom needs a restart.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewSize.w, viewSize.h]);
+  }, [viewSize.w, viewSize.h, zoom]);
 
   const onPointer = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const view = camera.current;
-    const scale = (view.w * TILE) / rect.width;
-    const tx = view.x + ((e.clientX - rect.left) * scale) / TILE;
-    const ty = view.y + ((e.clientY - rect.top) * scale) / TILE;
+    const tile = TILE * zoom;
+    const tx = view.x + (e.clientX - rect.left) / tile;
+    const ty = view.y + (e.clientY - rect.top) / tile;
     const dx = tx - (run.player.x + 0.5), dy = ty - (run.player.y + 0.5);
     if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
     if (Math.abs(dx) > Math.abs(dy)) onMove(Math.sign(dx), 0);
@@ -280,10 +310,11 @@ function GameCanvas({ run, hero, reducedMotion, onMove }: {
   return (
     <canvas
       ref={ref}
-      width={viewSize.w * TILE}
-      height={viewSize.h * TILE}
+      width={viewSize.w * TILE * zoom}
+      height={viewSize.h * TILE * zoom}
+      style={{ width: viewSize.w * TILE * zoom, height: viewSize.h * TILE * zoom }}
       onPointerDown={onPointer}
-      className="pixelated block h-auto w-full touch-manipulation select-none"
+      className="pixelated absolute top-0 left-0 block touch-manipulation select-none"
       role="img"
       aria-label={`Depth ${run.depth}. Light ${Math.ceil(run.light)}. Tap a side of your character to step that way.`}
     />

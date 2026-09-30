@@ -1,4 +1,5 @@
-import { BOSS_DEPTH, BOSS_HP, BOSS_SIZE, HP_SCALE, MAP_H, MAP_W } from "./config";
+import { BOSS_DEPTH, BOSS_HP, BOSS_SIZE, HP_SCALE, enemyCount, floorHeight, floorScale, floorWidth } from "./config";
+import { enemyDef, pickEnemy, type EnemySpecies } from "./enemies";
 import { chance, int, type Rng } from "./rng";
 
 export const WALL = 0;
@@ -9,8 +10,24 @@ export type Point = { x: number; y: number };
 export type ItemKind = "gold" | "crystal" | "oil" | "chest" | "vault" | "hoard";
 export type Item = Point & { id: number; kind: ItemKind };
 
-/** `x, y` is the top-left tile. Dimlings fill one tile; the boss fills `size` x `size`. */
-export type Dimling = Point & { id: number; hp: number; maxHp: number; awake: boolean; boss?: boolean; size?: number };
+export type DimlingPhase = "idle" | "windup" | "recovery";
+
+/**
+ * A creature. `x, y` is the top-left tile: ordinary creatures fill one tile, the boss fills `size` x `size`.
+ * A creature that has noticed the delver winds up before it hits (see enemies.ts); the fields after `size` track that.
+ * Descents saved before creatures had species omit them, and are read as idle Wickgnaws.
+ */
+export type Dimling = Point & {
+  id: number; hp: number; maxHp: number; awake: boolean; boss?: boolean; size?: number;
+  species?: EnemySpecies;
+  phase?: DimlingPhase;
+  /** Turns left before the blow lands, while winding up. */
+  windupLeft?: number;
+  /** Turns left recovering after a blow. */
+  cooldown?: number;
+  /** The direction a line attack is aimed, fixed when the wind-up starts. */
+  aim?: Point | null;
+};
 
 export type FloorTheme = "catacombs" | "mycelium" | "cinderworks" | "hollowglass";
 
@@ -29,7 +46,8 @@ export type Floor = {
   revealed: boolean;
 };
 
-export const idx = (x: number, y: number) => y * MAP_W + x;
+/** Index of a tile in `floor.tiles` and `floor.seen`. Floors 1-3 are wider than the rest, so the floor supplies the width. */
+export const idx = (floor: { w: number }, x: number, y: number) => y * floor.w + x;
 
 const manhattan = (a: Point, b: Point) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 
@@ -47,7 +65,7 @@ export function dimlingDistance(d: Point & { size?: number }, p: Point) {
 }
 
 export function isFloor(floor: Floor, x: number, y: number) {
-  return x >= 0 && y >= 0 && x < floor.w && y < floor.h && floor.tiles[idx(x, y)] === FLOOR;
+  return x >= 0 && y >= 0 && x < floor.w && y < floor.h && floor.tiles[idx(floor, x, y)] === FLOOR;
 }
 
 const DIRS: readonly Point[] = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }];
@@ -67,43 +85,42 @@ type AuthoredMap = {
 
 const route = (points: Point[], width = 2): AuthoredRoute => ({ points, width });
 
-/** Walkable areas traced against the seven illustrated floors at 27×17 tiles. */
+/** Walkable areas traced against the seven illustrated floors: 34×22 tiles for floors 1-3, 27×17 for the rest. */
 function authoredMap(depth: number): AuthoredMap | null {
   switch (depth) {
     case 1:
       return {
         roomCount: 2,
-        rooms: [{ x: 2, y: 5, w: 6, h: 6 }, { x: 18, y: 4, w: 7, h: 8 }],
-        routes: [route([{ x: 7, y: 8 }, { x: 18, y: 8 }], 3)],
-        spawn: { x: 4, y: 8 }, stairs: { x: 21, y: 8 },
+        rooms: [{ x: 3, y: 7, w: 7, h: 8 }, { x: 22, y: 6, w: 10, h: 10 }],
+        routes: [route([{ x: 9, y: 10 }, { x: 22, y: 10 }], 3)],
+        spawn: { x: 5, y: 10 }, stairs: { x: 26, y: 10 },
       };
     case 2:
       return {
         roomCount: 3,
         rooms: [
-          { x: 2, y: 4, w: 6, h: 6 }, { x: 12, y: 5, w: 4, h: 5 }, { x: 20, y: 4, w: 5, h: 7 },
-          { x: 13, y: 13, w: 3, h: 2 },
+          { x: 3, y: 5, w: 7, h: 9 }, { x: 15, y: 6, w: 5, h: 7 }, { x: 25, y: 5, w: 7, h: 10 },
+          { x: 16, y: 17, w: 4, h: 2 },
         ],
         routes: [
-          route([{ x: 7, y: 7 }, { x: 12, y: 7 }], 2),
-          route([{ x: 15, y: 7 }, { x: 20, y: 7 }], 2),
-          route([{ x: 14, y: 9 }, { x: 14, y: 13 }], 2),
+          route([{ x: 9, y: 9 }, { x: 15, y: 9 }], 2),
+          route([{ x: 19, y: 10 }, { x: 25, y: 10 }], 2),
+          route([{ x: 18, y: 12 }, { x: 18, y: 17 }], 2),
         ],
-        spawn: { x: 4, y: 7 }, stairs: { x: 22, y: 7 },
+        spawn: { x: 5, y: 9 }, stairs: { x: 28, y: 9 },
       };
     case 3:
       return {
         roomCount: 3,
         rooms: [
-          { x: 2, y: 4, w: 8, h: 6 }, { x: 18, y: 3, w: 7, h: 5 }, { x: 8, y: 12, w: 12, h: 3 },
+          { x: 3, y: 5, w: 9, h: 8 }, { x: 22, y: 3, w: 10, h: 7 }, { x: 10, y: 16, w: 16, h: 3 },
         ],
         routes: [
-          route([{ x: 9, y: 5 }, { x: 18, y: 5 }], 2),
-          route([{ x: 7, y: 9 }, { x: 7, y: 13 }], 2),
-          route([{ x: 7, y: 13 }, { x: 20, y: 13 }], 2),
-          route([{ x: 20, y: 13 }, { x: 20, y: 7 }], 2),
+          route([{ x: 11, y: 7 }, { x: 22, y: 7 }], 2),
+          route([{ x: 9, y: 12 }, { x: 9, y: 17 }], 3),
+          route([{ x: 26, y: 9 }, { x: 26, y: 15 }], 3),
         ],
-        spawn: { x: 4, y: 7 }, stairs: { x: 21, y: 5 },
+        spawn: { x: 5, y: 9 }, stairs: { x: 26, y: 7 },
       };
     case 4:
       return {
@@ -223,13 +240,13 @@ export function themeForDepth(depth: number): FloorTheme {
 export function distances(floor: Floor, from: Point) {
   const dist = new Array<number>(floor.w * floor.h).fill(-1);
   const queue: Point[] = [from];
-  dist[idx(from.x, from.y)] = 0;
+  dist[idx(floor, from.x, from.y)] = 0;
   for (let head = 0; head < queue.length; head++) {
     const p = queue[head];
     for (const d of DIRS) {
       const nx = p.x + d.x, ny = p.y + d.y;
-      if (!isFloor(floor, nx, ny) || dist[idx(nx, ny)] !== -1) continue;
-      dist[idx(nx, ny)] = dist[idx(p.x, p.y)] + 1;
+      if (!isFloor(floor, nx, ny) || dist[idx(floor, nx, ny)] !== -1) continue;
+      dist[idx(floor, nx, ny)] = dist[idx(floor, p.x, p.y)] + 1;
       queue.push({ x: nx, y: ny });
     }
   }
@@ -239,7 +256,8 @@ export function distances(floor: Floor, from: Point) {
 export type FloorOptions = { findPct: number };
 
 export function generateFloor(rng: Rng, depth: number, options: FloorOptions): Floor {
-  const w = MAP_W, h = MAP_H;
+  const w = floorWidth(depth), h = floorHeight(depth);
+  const at = (x: number, y: number) => y * w + x;
   const tiles = new Array<number>(w * h).fill(WALL);
   const authored = authoredMap(depth);
   const layout = authored ? null : layoutForDepth(depth);
@@ -249,7 +267,7 @@ export function generateFloor(rng: Rng, depth: number, options: FloorOptions): F
   if (layout) for (const slot of layout.rooms) centers[slot] = mirrorPoint(ROOM_CENTERS[slot]);
   const carve = (x: number, y: number) => {
     const bossEntrance = depth === 7 && y === h - 1 && x >= 12 && x <= 14;
-    if (bossEntrance || (x >= 1 && y >= 1 && x < w - 1 && y < h - 1)) tiles[idx(x, y)] = FLOOR;
+    if (bossEntrance || (x >= 1 && y >= 1 && x < w - 1 && y < h - 1)) tiles[at(x, y)] = FLOOR;
   };
 
   let spawn: Point;
@@ -314,17 +332,17 @@ export function generateFloor(rng: Rng, depth: number, options: FloorOptions): F
   const dist = distances(floor, spawn);
   const cells: Point[] = [];
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const d = dist[idx(x, y)];
+    const d = dist[at(x, y)];
     if (d < 0) continue;
     cells.push({ x, y });
   }
 
-  const taken = new Set<number>([idx(spawn.x, spawn.y), idx(stairs.x, stairs.y)]);
+  const taken = new Set<number>([at(spawn.x, spawn.y), at(stairs.x, stairs.y)]);
   let nextId = 1;
   const place = (minDist: number) => {
     for (let tries = 0; tries < 200; tries++) {
       const c = cells[int(rng, 0, cells.length - 1)];
-      const k = idx(c.x, c.y);
+      const k = at(c.x, c.y);
       if (taken.has(k) || dist[k] < minDist) continue;
       taken.add(k);
       return c;
@@ -336,32 +354,47 @@ export function generateFloor(rng: Rng, depth: number, options: FloorOptions): F
     if (c) floor.items.push({ ...c, id: nextId++, kind });
   };
 
+  // A bigger floor holds proportionally more, so loot per step walked stays about the same.
   const find = 1 + options.findPct / 100;
-  for (let i = 0; i < 6 + depth; i++) addItem("gold");
-  for (let i = 0; i < 3 + Math.floor(depth / 2); i++) addItem("crystal");
-  for (let i = 0; i < Math.max(1, 3 - Math.floor(depth / 3)); i++) addItem("oil");
+  const scale = floorScale(depth);
+  const count = (base: number) => Math.round(base * scale);
+  for (let i = 0; i < count(6 + depth); i++) addItem("gold");
+  for (let i = 0; i < count(3 + Math.floor(depth / 2)); i++) addItem("crystal");
+  for (let i = 0; i < count(Math.max(1, 3 - Math.floor(depth / 3))); i++) addItem("oil");
   addItem("chest", 6);
   if (chance(rng, Math.min(0.9, 0.4 * find))) addItem("chest", 6);
+  if (scale > 1 && chance(rng, Math.min(0.9, 0.4 * find))) addItem("chest", 6);
   if (depth >= 3 && chance(rng, Math.min(0.95, 0.35 * find))) addItem("vault", 10);
 
-  const dimlings = 1 + Math.floor(depth * 0.8);
+  // Six creatures on the first floor and more below, but never more than the rooms can hold.
+  const dimlings = Math.min(enemyCount(depth), Math.floor(cells.length / 12));
   for (let i = 0; i < dimlings; i++) {
     if (i === 0 && depth === BOSS_DEPTH) {
       // Cerberus replaces the first dimling. It takes a 2x2 patch of open floor close to the stairs it seals.
-      const free = (c: Point) => cells.some(o => o.x === c.x && o.y === c.y) && !taken.has(idx(c.x, c.y));
+      const free = (c: Point) => cells.some(o => o.x === c.x && o.y === c.y) && !taken.has(at(c.x, c.y));
       const guard = cells
         .filter(c => footprint({ ...c, size: BOSS_SIZE }).every(free) && dimlingDistance({ ...c, size: BOSS_SIZE }, stairs) >= 2)
         .sort((a, b) => dimlingDistance({ ...a, size: BOSS_SIZE }, stairs) - dimlingDistance({ ...b, size: BOSS_SIZE }, stairs) || a.y - b.y || a.x - b.x)[0];
       if (guard) {
-        for (const c of footprint({ ...guard, size: BOSS_SIZE })) taken.add(idx(c.x, c.y));
+        for (const c of footprint({ ...guard, size: BOSS_SIZE })) taken.add(at(c.x, c.y));
         floor.dimlings.push({ ...guard, id: nextId++, hp: BOSS_HP, maxHp: BOSS_HP, awake: false, boss: true, size: BOSS_SIZE });
         continue;
       }
     }
-    const c = place(6);
+    // Keep creatures a few tiles apart so they do not arrive as one lump.
+    let c: Point | null = null;
+    for (let tries = 0; tries < 30 && !c; tries++) {
+      const candidate = place(6);
+      if (!candidate) break;
+      if (floor.dimlings.every(o => manhattan(o, candidate) >= 3)) c = candidate;
+      else taken.delete(at(candidate.x, candidate.y));
+    }
     if (!c) continue;
-    const hp = (2 + Math.floor(depth / 2)) * HP_SCALE;
-    floor.dimlings.push({ ...c, id: nextId++, hp, maxHp: hp, awake: false });
+    const species = pickEnemy(rng, depth);
+    const hp = Math.round((2 + Math.floor(depth / 2)) * HP_SCALE * enemyDef(species).hp);
+    floor.dimlings.push({
+      ...c, id: nextId++, hp, maxHp: hp, awake: false, species, phase: "idle", windupLeft: 0, cooldown: 0, aim: null,
+    });
   }
   return floor;
 }
@@ -387,7 +420,7 @@ export function visibleSet(floor: Floor, from: Point, radius: number) {
     for (let x = from.x - radius; x <= from.x + radius; x++) {
       if (x < 0 || y < 0 || x >= floor.w || y >= floor.h) continue;
       if ((x - from.x) ** 2 + (y - from.y) ** 2 > radius * radius + radius) continue;
-      if (hasLineOfSight(floor, from, { x, y })) out.add(idx(x, y));
+      if (hasLineOfSight(floor, from, { x, y })) out.add(idx(floor, x, y));
     }
   }
   return out;

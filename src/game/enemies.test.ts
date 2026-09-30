@@ -1,0 +1,263 @@
+/// <reference types="node" />
+import { existsSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { NO_PERKS } from "./catalog";
+import { ENEMY_HIT_MULT, ENEMY_RECOVERY, MAP_H, MAP_W, enemyCount, floorHeight, floorScale, floorWidth, stepCost } from "./config";
+import { generateFloor, idx, type Dimling } from "./dungeon";
+import { ENEMIES, enemiesAvailableAt, enemyDef } from "./enemies";
+import { attackTiles, reachDirection, windupProgress } from "./enemy-ai";
+import { createRng } from "./rng";
+import { applyAction, emptyBag, startRun, type RunState } from "./run";
+
+/** An open 11 x 11 room with the delver in the middle, nothing else on the floor, and plenty of light. */
+function room(over: Partial<Parameters<typeof startRun>[0]> = {}): RunState {
+  const s = startRun({ seed: 7, flasks: 5, perks: NO_PERKS, weaponDamage: 8, bag: emptyBag(), ...over });
+  s.floor.tiles.fill(0);
+  for (let y = 2; y <= 12; y++) for (let x = 2; x <= 12; x++) s.floor.tiles[idx(s.floor, x, y)] = 1;
+  s.floor.items = [];
+  s.floor.dimlings = [];
+  s.player = { x: 6, y: 6, facing: "right" };
+  return s;
+}
+
+const creature = (over: Partial<Dimling> = {}): Dimling => ({
+  id: 1, x: 7, y: 6, hp: 16, maxHp: 16, awake: true, species: "wickgnaw", phase: "idle", windupLeft: 0, cooldown: 0, aim: null, ...over,
+});
+
+const wait = (s: RunState) => applyAction(s, { type: "wait" });
+const hit = (depth = 1) => (2 + Math.floor(depth / 2)) * ENEMY_HIT_MULT;
+
+describe("a creature that strikes after a warning", () => {
+  it("winds up first, then strikes, then is open for a turn before it can start again", () => {
+    let s = room();
+    s.floor.dimlings = [creature()];
+    const start = s.light;
+
+    s = wait(s);
+    expect(s.events).toContain("warn");
+    expect(s.floor.dimlings[0]).toMatchObject({ phase: "windup", windupLeft: 1 });
+    // The warning itself costs nothing but the step.
+    expect(start - s.light).toBeCloseTo(stepCost(1));
+
+    const before = s.light;
+    s = wait(s);
+    expect(s.events).toContain("drain");
+    expect(before - s.light).toBeCloseTo(stepCost(1) + hit());
+    expect(s.floor.dimlings[0]).toMatchObject({ phase: "recovery", cooldown: ENEMY_RECOVERY });
+
+    // While it recovers it cannot hit, whatever the delver does.
+    const rest = s.light;
+    s = wait(s);
+    expect(s.events).not.toContain("drain");
+    expect(rest - s.light).toBeCloseTo(stepCost(1));
+    expect(s.floor.dimlings[0].phase).toBe("idle");
+
+    s = wait(s);
+    expect(s.events).toContain("warn");
+  });
+
+  it("misses a delver who steps off the marked tiles in time", () => {
+    let s = room();
+    s.floor.dimlings = [creature()];
+    s = wait(s);
+    const marked = attackTiles(s.floor, s.floor.dimlings[0]);
+    expect(marked).toHaveLength(4);
+    expect(marked.some(t => t.x === 6 && t.y === 6)).toBe(true);
+    const before = s.light;
+    s = applyAction(s, { type: "move", dx: -1, dy: 0 });
+    expect(s.player).toMatchObject({ x: 5, y: 6 });
+    expect(s.events).toContain("miss");
+    expect(s.events).not.toContain("drain");
+    expect(before - s.light).toBeCloseTo(stepCost(1));
+    expect(s.floor.dimlings[0].phase).toBe("recovery");
+  });
+
+  it("is cancelled by killing the creature during its wind-up", () => {
+    let s = room();
+    s.floor.dimlings = [creature({ hp: 8, maxHp: 8 })];
+    s = wait(s);
+    expect(s.floor.dimlings[0].phase).toBe("windup");
+    s = applyAction(s, { type: "move", dx: 1, dy: 0 });
+    expect(s.events).toContain("kill");
+    expect(s.events).not.toContain("drain");
+    expect(s.floor.dimlings).toHaveLength(0);
+    expect(s.messages[0]).toMatch(/Wickgnaw defeated/);
+  });
+
+  it("is turned aside by a ward, and says so", () => {
+    let s = room({ bag: { ...emptyBag(), ward: 1 } });
+    s.floor.dimlings = [creature()];
+    s = applyAction(s, { type: "potion", id: "ward" });
+    s = wait(s);
+    s = wait(s);
+    expect(s.events).toContain("miss");
+    expect(s.events).not.toContain("drain");
+    expect(s.messages.some(m => /ward/i.test(m))).toBe(true);
+  });
+
+  it("takes less light through armor, like every other blow", () => {
+    let s = room({ perks: { ...NO_PERKS, drainReduce: 0.5 } });
+    s.floor.dimlings = [creature()];
+    s = wait(s);
+    const before = s.light;
+    s = wait(s);
+    expect(before - s.light).toBeCloseTo(stepCost(1) + hit() * 0.5);
+  });
+
+  it("aims a line attack when the wind-up starts, and gives slow creatures two moves to dodge", () => {
+    let s = room();
+    const toad = enemyDef("snaretoad");
+    expect(toad.windup).toBe(2);
+    s.floor.dimlings = [creature({ species: "snaretoad", x: 9, y: 6 })];
+    s = wait(s);
+    let d = s.floor.dimlings[0];
+    expect(d).toMatchObject({ phase: "windup", windupLeft: 2, aim: { x: -1, y: 0 } });
+    expect(attackTiles(s.floor, d).map(t => `${t.x},${t.y}`)).toEqual(["8,6", "7,6", "6,6"]);
+    expect(windupProgress(d)).toBeCloseTo(0.5);
+
+    s = wait(s);
+    d = s.floor.dimlings[0];
+    expect(s.events).not.toContain("drain");
+    expect(windupProgress(d)).toBe(1);
+
+    // Stepping sideways leaves the line.
+    const before = s.light;
+    s = applyAction(s, { type: "move", dx: 0, dy: 1 });
+    expect(s.events).toContain("miss");
+    expect(before - s.light).toBeCloseTo(stepCost(1));
+  });
+
+  it("hits a delver who stays in the line", () => {
+    let s = room();
+    s.floor.dimlings = [creature({ species: "snaretoad", x: 9, y: 6 })];
+    for (let i = 0; i < 3; i++) s = wait(s);
+    expect(s.events).toContain("drain");
+  });
+
+  it("does not wind up when the delver is not in its reach", () => {
+    let s = room();
+    s.floor.dimlings = [creature({ x: 9, y: 9 })];
+    s = wait(s);
+    expect(s.floor.dimlings[0].phase).toBe("idle");
+    expect(s.events).not.toContain("warn");
+    // A cross reaches only as far as its range: two tiles away is out of a Wickgnaw's reach.
+    s = room();
+    s.floor.dimlings = [creature({ x: 8, y: 6 })];
+    expect(reachDirection(s.floor, s.floor.dimlings[0], s.player)).toBeNull();
+  });
+
+  it("never attacks from the dark, so the warning is always in view", () => {
+    let s = room();
+    s.light = 10;
+    s.floor.dimlings = [creature({ species: "cinder-hound", x: 9, y: 6 })];
+    s = wait(s);
+    expect(s.floor.dimlings[0].phase).not.toBe("windup");
+    expect(s.events).not.toContain("warn");
+  });
+
+  it("is stopped by walls: no line of attack through them", () => {
+    const s = room();
+    s.floor.tiles[idx(s.floor, 7, 6)] = 0;
+    const d = creature({ species: "snaretoad", x: 9, y: 6, aim: { x: -1, y: 0 } });
+    expect(reachDirection(s.floor, d, s.player)).toBeNull();
+    expect(attackTiles(s.floor, d).map(t => `${t.x},${t.y}`)).toEqual(["8,6"]);
+  });
+
+  it("keeps a stationary creature where it is", () => {
+    let s = room();
+    s.floor.dimlings = [creature({ species: "chaincoil", x: 11, y: 11 })];
+    for (let i = 0; i < 20; i++) s = wait(s);
+    expect(s.floor.dimlings[0]).toMatchObject({ x: 11, y: 11 });
+  });
+
+  it("wakes only when the delver comes near and leaves sleeping creatures alone", () => {
+    let s = room();
+    s.floor.dimlings = [creature({ awake: false, x: 12, y: 12 })];
+    for (let i = 0; i < 5; i++) s = wait(s);
+    expect(s.floor.dimlings[0]).toMatchObject({ x: 12, y: 12, phase: "idle" });
+  });
+
+  it("gives a defeated creature's gold from the kill table", () => {
+    let s = room();
+    s.floor.dimlings = [creature({ hp: 8, maxHp: 8, awake: false })];
+    s = applyAction(s, { type: "move", dx: 1, dy: 0 });
+    expect(s.gold).toBeGreaterThanOrEqual(3);
+    expect(s.gold).toBeLessThanOrEqual(6);
+  });
+});
+
+describe("the creatures and the floors they live on", () => {
+  it("has a picture for every creature", () => {
+    for (const e of ENEMIES) expect(existsSync(`public/enemies/${e.id}.webp`), e.id).toBe(true);
+  });
+
+  it("gives every creature a reach, a wind-up and a way to be beaten", () => {
+    for (const e of ENEMIES) {
+      expect(e.range).toBeGreaterThanOrEqual(1);
+      expect(e.windup).toBeGreaterThanOrEqual(1);
+      expect(e.hp).toBeGreaterThan(0);
+      expect(e.move).toBeGreaterThanOrEqual(0);
+      expect(["line", "cross"]).toContain(e.attack);
+    }
+  });
+
+  it("introduces creatures gradually, with more to choose from as the floors go down", () => {
+    expect(enemiesAvailableAt(1).map(e => e.id)).toEqual(["wickgnaw", "snaretoad"]);
+    for (let depth = 2; depth <= 6; depth++) expect(enemiesAvailableAt(depth).length).toBeGreaterThanOrEqual(enemiesAvailableAt(depth - 1).length);
+    expect(enemiesAvailableAt(6)).toHaveLength(ENEMIES.length);
+  });
+
+  it("puts at least six creatures on the first floor and a few more on every one after", () => {
+    expect(enemyCount(1)).toBe(6);
+    for (let depth = 2; depth <= 12; depth++) expect(enemyCount(depth)).toBeGreaterThan(enemyCount(depth - 1));
+    for (let seed = 1; seed <= 40; seed++) {
+      const floor = generateFloor(createRng(seed), 1, { findPct: 0 });
+      expect(floor.dimlings.length).toBeGreaterThanOrEqual(6);
+      for (const d of floor.dimlings) {
+        expect(["wickgnaw", "snaretoad"]).toContain(d.species);
+        expect(d).toMatchObject({ phase: "idle", awake: false });
+      }
+    }
+  });
+
+  it("spaces creatures out and keeps them off the rift, the stairs and the loot", () => {
+    for (let depth = 1; depth <= 6; depth++) {
+      const floor = generateFloor(createRng(depth * 17), depth, { findPct: 0 });
+      const items = new Set(floor.items.map(i => `${i.x},${i.y}`));
+      floor.dimlings.forEach((d, i) => {
+        expect(items.has(`${d.x},${d.y}`)).toBe(false);
+        expect([d.x, d.y]).not.toEqual([floor.spawn.x, floor.spawn.y]);
+        expect([d.x, d.y]).not.toEqual([floor.stairs.x, floor.stairs.y]);
+        for (const o of floor.dimlings.slice(i + 1)) expect(Math.abs(d.x - o.x) + Math.abs(d.y - o.y)).toBeGreaterThanOrEqual(3);
+      });
+    }
+  });
+
+  it("makes floors 1-3 about 60% bigger than the rest", () => {
+    for (let depth = 1; depth <= 3; depth++) {
+      expect([floorWidth(depth), floorHeight(depth)]).toEqual([34, 22]);
+      expect(floorScale(depth)).toBeGreaterThanOrEqual(1.6);
+      const floor = generateFloor(createRng(depth), depth, { findPct: 0 });
+      expect([floor.w, floor.h]).toEqual([34, 22]);
+      expect(floor.tiles).toHaveLength(34 * 22);
+    }
+    for (let depth = 4; depth <= 9; depth++) {
+      expect([floorWidth(depth), floorHeight(depth)]).toEqual([MAP_W, MAP_H]);
+      expect(generateFloor(createRng(depth), depth, { findPct: 0 }).tiles).toHaveLength(MAP_W * MAP_H);
+    }
+    // In practice that is 60% more floor to walk on than the traced 27 x 17 layouts had.
+    const walkable = (depth: number) => generateFloor(createRng(depth), depth, { findPct: 0 }).tiles.filter(t => t === 1).length;
+    expect(walkable(1)).toBeGreaterThanOrEqual(185);
+    expect(walkable(2)).toBeGreaterThanOrEqual(200);
+    expect(walkable(3)).toBeGreaterThanOrEqual(235);
+  });
+
+  it("carries a saved floor of any depth through a copy without losing its creatures' state", () => {
+    const s = room();
+    s.floor.dimlings = [creature({ phase: "windup", windupLeft: 2, aim: { x: 0, y: 1 } })];
+    const copy = JSON.parse(JSON.stringify(s)) as RunState;
+    expect(copy.floor.dimlings[0]).toMatchObject({ phase: "windup", windupLeft: 2, aim: { x: 0, y: 1 } });
+    // The next turn behaves the same on the copy.
+    expect(wait(copy).floor.dimlings[0].windupLeft).toBe(1);
+  });
+});

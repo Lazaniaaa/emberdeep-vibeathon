@@ -12,7 +12,8 @@ Emberdeep was built for the Rare Friends Vibeathon with AI assistance (Claude, v
 
 - **Rare Friends artwork belongs to Rare Friends.** Friend sprites are read live from the Generations sprite registry on Robinhood Chain. The six Friend pictures in `src/assets/friends/` are shown only to showcase the collection in the weekly raffle banner and lot.
 - **Dungeon floor illustrations** (`public/maps/`, originals in `art-src/maps/`): supplied by the builder for this project (add the artist or tool here if it should be credited).
-- **Everything else** (the camp scene, monsters, Cerberus, items, armor, potions, Delver portraits and the interface sprites) is pixel art drawn in code for this project. Sound cues are generated with the Web Audio API.
+- **Creature illustrations** (`public/enemies/`, originals in `art-src/enemies/`): the nine dungeon creatures (Wickgnaw, Snaretoad, Cinder Hound, Chaincoil, Needle Wraith, Sootplate, Hollow Burrower, Fourfold Bell, Rift Leaper) were supplied by the builder from an earlier build of this project (add the artist or tool here if it should be credited).
+- **Everything else** (the camp scene, Cerberus, items, armor, potions, Delver portraits and the interface sprites) is pixel art drawn in code for this project. Sound cues are generated with the Web Audio API.
 
 ## Economy
 

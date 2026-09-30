@@ -44,11 +44,10 @@ export const MAX_KEYS = 30;
 /** One click of "other delvers this week": their spend. It feeds the raffle treasury and the round pool. */
 export const FIELD_WEEK_SPEND = 20_000;
 /**
- * Simulated crowd: gold banked per RF they spend. 2.3 is what the simulated 70/20/10 crowd of unperked,
- * blessed and top-build delvers banks on average, so a lone delver in the demo is measured against a crowd
- * that includes players with good gear. The bots it comes from rarely die, so real players may bank less.
+ * Simulated crowd: gold banked per RF they spend. The simulated 70/20/10 crowd of unperked, blessed and top-build
+ * bots banks about 2.2; real players make mistakes the bots do not, so the crowd is set a little below that.
  */
-export const FIELD_GOLD_PER_RF = 2.3;
+export const FIELD_GOLD_PER_RF = 1.8;
 /**
  * The most a delver takes back from the round pool, as a multiple of what they put into descents that round
  * (entry keys plus oil): +60% at the very best. Whatever the cap withholds stays in the pool for the next round.
@@ -64,6 +63,32 @@ export const FIELD_LOCK_GOLD = 16_000;
 
 export const MAP_W = 27;
 export const MAP_H = 17;
+
+/**
+ * Floors 1-3 use a finer grid over the same painted rooms, so they hold about 60% more walkable tiles
+ * (34x22 against 27x17) and a delver has room to move, fight and dodge. Deeper floors keep 27x17.
+ */
+export const BIG_FLOOR_DEPTH = 3;
+export const BIG_MAP_W = 34;
+export const BIG_MAP_H = 22;
+export const floorWidth = (depth: number) => (depth <= BIG_FLOOR_DEPTH ? BIG_MAP_W : MAP_W);
+export const floorHeight = (depth: number) => (depth <= BIG_FLOOR_DEPTH ? BIG_MAP_H : MAP_H);
+/** How much bigger than a 27x17 floor this depth's grid is. Loot and creatures scale with it. */
+export const floorScale = (depth: number) => (floorWidth(depth) * floorHeight(depth)) / (MAP_W * MAP_H);
+
+/** Creatures on a floor: six on the first, then a few more each level. The arena of floor 7 is capped by its size. */
+export function enemyCount(depth: number) {
+  return 6 + Math.round((depth - 1) * 1);
+}
+/**
+ * A creature hits after a warning (see enemies.ts) and a hit takes this many times the light a creature used to drink
+ * in a turn, since it lands every few turns instead of every turn and can be dodged.
+ */
+export const ENEMY_HIT_MULT = 1.25;
+/** Gold a defeated creature drops, before the depth multiplier. */
+export const KILL_GOLD: readonly [number, number] = [3, 6];
+/** Turns a creature is stuck recovering after it attacks. */
+export const ENEMY_RECOVERY = 1;
 
 /**
  * Hit points and blows are counted in these units, so a dimling has 16-40 HP and a blow is 8-40.

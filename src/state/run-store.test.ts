@@ -56,7 +56,12 @@ describe("saved run validation", () => {
       ["item without id", r => { r.floor.items = [{ x: 3, y: 3, kind: "gold" }]; }],
       ["dimling without health", r => { r.floor.dimlings = [{ id: 1, x: 3, y: 3, awake: false }]; }],
       ["oversized dimling", r => { r.floor.dimlings = [{ id: 1, x: 3, y: 3, hp: 5, maxHp: 5, awake: false, size: 9 }]; }],
-      ["boss hanging off the edge", r => { r.floor.dimlings = [{ id: 1, x: 26, y: 16, hp: 5, maxHp: 5, awake: false, size: 2 }]; }],
+      // Floor 1 is 34 x 22 tiles.
+      ["boss hanging off the edge", r => { r.floor.dimlings = [{ id: 1, x: 33, y: 21, hp: 5, maxHp: 5, awake: false, size: 2 }]; }],
+      ["floor of the wrong size for its depth", r => { r.floor.w = 27; r.floor.h = 17; r.floor.tiles = r.floor.tiles.slice(0, 27 * 17); r.floor.seen = r.floor.seen.slice(0, 27 * 17); }],
+      ["creature of an unknown species", r => { r.floor.dimlings = [{ id: 1, x: 8, y: 10, hp: 5, maxHp: 5, awake: false, species: "dragon" }]; }],
+      ["creature with a bad phase", r => { r.floor.dimlings = [{ id: 1, x: 8, y: 10, hp: 5, maxHp: 5, awake: false, phase: "sleeping" }]; }],
+      ["creature aimed diagonally", r => { r.floor.dimlings = [{ id: 1, x: 8, y: 10, hp: 5, maxHp: 5, awake: true, phase: "windup", windupLeft: 1, aim: { x: 1, y: 1 } }]; }],
       ["bad theme", r => { r.floor.theme = "lava"; }],
       ["floor from another depth", r => { r.floor.depth = 5; }],
       ["seen with junk", r => { r.floor.seen[3] = 7; }],

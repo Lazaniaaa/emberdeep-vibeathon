@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   BOSS_DEPTH, BOSS_DRAIN, BOSS_HP, BOSS_SIZE, BURN_SHARE, HOARD_CRYSTALS, HOARD_GOLD, HOARD_SIGIL_CHANCE, HP_SCALE, FLASK_LIGHT, HEAL_LIGHT, KEY_PRICE, LOCK_SHARE, NIGHT_VISION_STEPS, POOL_SHARE, RAFFLE_SHARE, ACTIVE_SHARE,
   RAGE_HITS, RAGE_MULT, REGEN_TURNS,
-  FIELD_GOLD_PER_RF, FLASK_PRICE, HOLD_FACTOR, MAX_ROUND_RETURN, ROUND_SEED_GOLD, ROUND_SEED_LOCKED, ROUND_SEED_POOL, stepCost,
+  FIELD_GOLD_PER_RF, FLASK_PRICE, HOLD_FACTOR, MAX_ROUND_RETURN, ROUND_SEED_GOLD, ROUND_SEED_LOCKED, ROUND_SEED_POOL, enemyCount,
+  floorScale, stepCost,
 } from "./config";
+import { enemyDef } from "./enemies";
 import { FRIEND_BLESSING, MAX_STEP_DISCOUNT, NO_PERKS, POTIONS, POTION_DROP_WEIGHTS, SHOP_POTION_IDS, mergePerks, scalePerks } from "./catalog";
 import { dimlingDistance, distances, footprint, generateFloor, idx, themeForDepth, type Dimling } from "./dungeon";
 import { applyClaim, applySpend, roundShare, settleRound, splitSpend } from "./economy";
@@ -111,12 +113,12 @@ describe("dungeon", () => {
     for (let seed = 1; seed <= 200; seed++) {
       const floor = generateFloor(createRng(seed), 1 + (seed % 8), { findPct: 0 });
       const dist = distances(floor, floor.spawn);
-      expect(dist[idx(floor.stairs.x, floor.stairs.y)]).toBeGreaterThan(5);
-      expect(dist[idx(floor.stairs.x, floor.stairs.y)]).toBeLessThanOrEqual(40);
+      expect(dist[idx(floor, floor.stairs.x, floor.stairs.y)]).toBeGreaterThan(5);
+      expect(dist[idx(floor, floor.stairs.x, floor.stairs.y)]).toBeLessThanOrEqual(45);
       for (let k = 0; k < floor.tiles.length; k++) {
         if (floor.tiles[k] === 1) expect(dist[k]).toBeGreaterThanOrEqual(0);
       }
-      for (const item of floor.items) expect(dist[idx(item.x, item.y)]).toBeGreaterThan(0);
+      for (const item of floor.items) expect(dist[idx(floor, item.x, item.y)]).toBeGreaterThan(0);
     }
   });
 
@@ -135,35 +137,38 @@ describe("dungeon", () => {
 
   it("keeps illustrated entrances and the boss arena on the walkable grid", () => {
     const first = generateFloor(createRng(1), 1, { findPct: 0 });
-    for (const y of [7, 8, 9]) expect(first.tiles[idx(13, y)]).toBe(1);
-    for (const y of [6, 10]) expect(first.tiles[idx(13, y)]).toBe(0);
+    for (const y of [9, 10, 11]) expect(first.tiles[idx(first, 13, y)]).toBe(1);
+    for (const y of [8, 12]) expect(first.tiles[idx(first, 13, y)]).toBe(0);
 
-    const stairs = [[21, 8], [22, 7], [21, 5], [22, 8], [22, 8], [22, 8], [13, 3]];
+    const stairs = [[26, 10], [28, 9], [26, 7], [22, 8], [22, 8], [22, 8], [13, 3]];
     for (let depth = 1; depth <= 7; depth++) {
       const floor = generateFloor(createRng(depth), depth, { findPct: 0 });
       expect([floor.stairs.x, floor.stairs.y]).toEqual(stairs[depth - 1]);
-      expect(floor.tiles[idx(floor.spawn.x, floor.spawn.y)]).toBe(1);
-      expect(floor.tiles[idx(floor.stairs.x, floor.stairs.y)]).toBe(1);
+      expect(floor.tiles[idx(floor, floor.spawn.x, floor.spawn.y)]).toBe(1);
+      expect(floor.tiles[idx(floor, floor.stairs.x, floor.stairs.y)]).toBe(1);
     }
 
     const arena = generateFloor(createRng(7), 7, { findPct: 0 });
     for (let y = 3; y <= 12; y++) {
-      for (let x = 8; x <= 18; x++) expect(arena.tiles[idx(x, y)]).toBe(1);
-      expect(arena.tiles[idx(7, y)]).toBe(0);
-      expect(arena.tiles[idx(19, y)]).toBe(0);
+      for (let x = 8; x <= 18; x++) expect(arena.tiles[idx(arena, x, y)]).toBe(1);
+      expect(arena.tiles[idx(arena, 7, y)]).toBe(0);
+      expect(arena.tiles[idx(arena, 19, y)]).toBe(0);
     }
-    expect(arena.tiles[idx(13, 14)]).toBe(1);
-    expect(arena.tiles[idx(13, 15)]).toBe(0);
+    expect(arena.tiles[idx(arena, 13, 14)]).toBe(1);
+    expect(arena.tiles[idx(arena, 13, 15)]).toBe(0);
   });
 
   it("keeps the existing guaranteed pickups and enemies placeable on every layout", () => {
     for (let depth = 1; depth <= 12; depth++) {
-      const guaranteedItems = (6 + depth) + (3 + Math.floor(depth / 2))
-        + Math.max(1, 3 - Math.floor(depth / 3)) + 1;
+      // A bigger floor holds proportionally more of everything.
+      const scaled = (n: number) => Math.round(n * floorScale(depth));
+      const guaranteedItems = scaled(6 + depth) + scaled(3 + Math.floor(depth / 2))
+        + scaled(Math.max(1, 3 - Math.floor(depth / 3))) + 1;
       for (let seed = 1; seed <= 20; seed++) {
         const floor = generateFloor(createRng(seed * 101 + depth), depth, { findPct: 0 });
+        const cells = floor.tiles.filter(t => t === 1).length;
         expect(floor.items.length).toBeGreaterThanOrEqual(guaranteedItems);
-        expect(floor.dimlings).toHaveLength(1 + Math.floor(depth * 0.8));
+        expect(floor.dimlings).toHaveLength(Math.min(enemyCount(depth), Math.floor(cells / 12)));
       }
     }
   });
@@ -199,8 +204,10 @@ describe("run", () => {
   });
 
   it("night vision buys extra steps once the light dies", () => {
-    const plain = waitUntilOver(run());
-    const saved = waitUntilOver(run({ bag: { ...emptyBag(), nightVision: 1 } }));
+    // Nothing else is on the floor, so only the lantern decides how long each descent lasts.
+    const alone = (overrides = {}) => { const s = run(overrides); s.floor.dimlings = []; return s; };
+    const plain = waitUntilOver(alone());
+    const saved = waitUntilOver(alone({ bag: { ...emptyBag(), nightVision: 1 } }));
     expect(saved.status).toBe("dead");
     expect(saved.used.nightVision).toBe(1);
     expect(saved.steps).toBeGreaterThanOrEqual(plain.steps + NIGHT_VISION_STEPS - 5);
@@ -216,8 +223,13 @@ describe("run", () => {
       expect(state.events).not.toContain("drain");
       expect(state.ward).toBe(15 - turn);
     }
-    state = applyAction(state, { type: "wait" });
-    expect(state.events).toContain("drain");
+    // Once the ward is gone the creature's next wind-up ends in a blow that lands.
+    let drained = false;
+    for (let turn = 0; turn < 6 && !drained; turn++) {
+      state = applyAction(state, { type: "wait" });
+      drained = state.events.includes("drain");
+    }
+    expect(drained).toBe(true);
   });
 
   it("lets an awake enemy route around a wall even when the first step moves away", () => {
@@ -226,7 +238,7 @@ describe("run", () => {
     state.player = { x: 4, y: 2, facing: "left" };
     state.floor.tiles.fill(0);
     for (const [x, y] of [[2, 2], [1, 2], [1, 3], [1, 4], [2, 4], [3, 4], [4, 4], [4, 3], [4, 2]]) {
-      state.floor.tiles[idx(x, y)] = 1;
+      state.floor.tiles[idx(state.floor, x, y)] = 1;
     }
     state.floor.dimlings = [{ id: 1, x: 2, y: 2, hp: 4, maxHp: 4, awake: true }];
     let reachedDetour = false;
@@ -248,7 +260,7 @@ describe("run", () => {
     let s = run();
     for (const [dx, dy] of [[-1, 0], [0, -1], [1, 0], [0, 1]]) {
       const tx = s.player.x + dx, ty = s.player.y + dy;
-      if (s.floor.tiles[idx(tx, ty)] === 0) {
+      if (s.floor.tiles[idx(s.floor, tx, ty)] === 0) {
         const after = applyAction(s, { type: "move", dx, dy });
         expect(after.steps).toBe(s.steps);
         expect(after.light).toBe(s.light);
@@ -273,15 +285,16 @@ describe("cerberus", () => {
     s.floor.dimlings = [{ id: 1, x: s.player.x + 1, y: s.player.y, hp: BOSS_HP, maxHp: BOSS_HP, awake: true, boss: true, ...extra }];
   };
 
-  it("scales health so dimlings hold 16-40 HP and Cerberus 150", () => {
+  it("scales creature health with depth and species (12-70 HP) and gives Cerberus 150", () => {
     for (let depth = 1; depth <= 7; depth++) {
       const floor = generateFloor(createRng(depth), depth, { findPct: 0 });
       const regular = floor.dimlings.filter(d => !d.boss);
       expect(regular.length).toBeGreaterThan(0);
       for (const d of regular) {
-        expect(d.hp).toBe((2 + Math.floor(depth / 2)) * HP_SCALE);
-        expect(d.hp).toBeGreaterThanOrEqual(16);
-        expect(d.hp).toBeLessThanOrEqual(40);
+        // The floor sets the base; each species is a little frailer or tougher than that.
+        expect(d.hp).toBe(Math.round((2 + Math.floor(depth / 2)) * HP_SCALE * enemyDef(d.species).hp));
+        expect(d.hp).toBeGreaterThanOrEqual(12);
+        expect(d.hp).toBeLessThanOrEqual(70);
       }
     }
     expect(BOSS_HP).toBe(150);
@@ -300,8 +313,8 @@ describe("cerberus", () => {
           expect(b.size).toBe(BOSS_SIZE);
           expect(footprint(b)).toHaveLength(BOSS_SIZE * BOSS_SIZE);
           for (const c of footprint(b)) {
-            expect(floor.tiles[idx(c.x, c.y)]).toBe(1);
-            expect(dist[idx(c.x, c.y)]).toBeGreaterThan(0);
+            expect(floor.tiles[idx(floor, c.x, c.y)]).toBe(1);
+            expect(dist[idx(floor, c.x, c.y)]).toBeGreaterThan(0);
             expect(floor.items.some(i => i.x === c.x && i.y === c.y)).toBe(false);
             expect(c.x === floor.stairs.x && c.y === floor.stairs.y).toBe(false);
           }
@@ -372,7 +385,7 @@ describe("cerberus", () => {
     let s = bossFight();
     s.light = 50_000;
     s.floor.tiles.fill(0);
-    for (let y = 2; y <= 12; y++) for (let x = 2; x <= 14; x++) s.floor.tiles[idx(x, y)] = 1;
+    for (let y = 2; y <= 12; y++) for (let x = 2; x <= 14; x++) s.floor.tiles[idx(s.floor, x, y)] = 1;
     s.player = { x: 13, y: 11, facing: "up" };
     s.floor.items = [];
     s.floor.dimlings = [
@@ -384,7 +397,7 @@ describe("cerberus", () => {
       s = applyAction(s, { type: "wait" });
       const b = s.floor.dimlings.find(d => d.boss)!;
       for (const c of footprint(b)) {
-        expect(s.floor.tiles[idx(c.x, c.y)]).toBe(1);
+        expect(s.floor.tiles[idx(s.floor, c.x, c.y)]).toBe(1);
         expect(c.x === s.player.x && c.y === s.player.y).toBe(false);
         expect(s.floor.dimlings.some(o => o !== b && footprint(o).some(oc => oc.x === c.x && oc.y === c.y))).toBe(false);
       }
@@ -573,7 +586,7 @@ describe("balance", () => {
     expect(Math.abs(omni - fog) / omni).toBeLessThan(0.15);
   });
 
-  it("sets the simulated crowd's rate at the average of the mixed crowd the simulation uses", { timeout: 120_000 }, () => {
+  it("sets the simulated crowd's rate a little below what the mixed crowd of bots banks, since people make mistakes", { timeout: 120_000 }, () => {
     // 70% unperked, 20% holding a Friend's blessing, 10% holding the strongest build, all only holding their perks.
     const held = (p: Parameters<typeof scalePerks>[0]) => scalePerks(p, HOLD_FACTOR);
     const mix = [
@@ -587,7 +600,9 @@ describe("balance", () => {
       gold += m.share * cost * simulateFogMany(40, m.flasks, m.perks).goldPerRf;
       spent += m.share * cost;
     }
-    expect(Math.abs(gold / spent - FIELD_GOLD_PER_RF) / FIELD_GOLD_PER_RF).toBeLessThan(0.1);
+    const bots = gold / spent;
+    expect(FIELD_GOLD_PER_RF).toBeLessThanOrEqual(bots);
+    expect(FIELD_GOLD_PER_RF).toBeGreaterThanOrEqual(bots * 0.7);
   });
 
   it("makes a key a fixed cost of every descent, so a single flask does not pay for itself", { timeout: 60_000 }, () => {
