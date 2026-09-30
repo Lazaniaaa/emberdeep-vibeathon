@@ -10,7 +10,8 @@
     "lint": "oxlint src",
     "typecheck": "tsc -b",
     "test": "vitest run",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "economy": "vitest run --config vitest.economy.config.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

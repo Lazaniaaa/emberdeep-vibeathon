@@ -1,5 +1,5 @@
 // Headless smoke test: camp renders, a descent starts, the player moves, and a run can end.
-// Usage: node scripts/smoke.mjs [baseUrl] [outDir]
+// Usage: node scripts/smoke.mjs [baseUrl] [outDir]   (set SMOKE_CHANNEL=msedge|chrome to use an installed browser)
 import { mkdirSync } from "node:fs";
 import { chromium } from "playwright";
 
@@ -7,7 +7,8 @@ const base = process.argv[2] ?? "http://127.0.0.1:5741/";
 const out = process.argv[3] ?? "artifacts";
 mkdirSync(out, { recursive: true });
 
-const browser = await chromium.launch();
+// SMOKE_CHANNEL=msedge (or chrome) runs against an installed browser instead of Playwright's bundled Chromium.
+const browser = await chromium.launch({ channel: process.env.SMOKE_CHANNEL || undefined });
 const errors = [];
 async function session(width, height, name, fn) {
   const page = await browser.newPage({ viewport: { width, height } });

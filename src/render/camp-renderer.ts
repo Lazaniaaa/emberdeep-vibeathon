@@ -311,9 +311,10 @@ export function campCamera(pos: { x: number; y: number }, view: View) {
 
 // ---------------------------------------------------------------- text
 
+// Silkscreen is drawn on an 8px grid; at 10px its "C" blurs into an "O" ("WELOOME"), so labels use 8 or 16.
 const FONT = (size: number) => `${size}px Silkscreen, monospace`;
 
-function outlined(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color: string, size = 10) {
+function outlined(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color: string, size = 8) {
   ctx.font = FONT(size);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -512,7 +513,7 @@ export function drawCamp(ctx: CanvasRenderingContext2D, f: CampFrame) {
   for (const s of STATIONS) {
     const isNear = f.near === s.id;
     const text = isNear ? `E  ${s.name.toUpperCase()}` : s.name.toUpperCase();
-    ctx.font = FONT(10);
+    ctx.font = FONT(8);
     const w = Math.round(ctx.measureText(text).width + 12);
     const cx = center(s.x), cy = s.y * CAMP_TILE - 24;
     ctx.fillStyle = isNear ? "#ccff00" : "rgba(21,12,43,0.82)";
@@ -532,7 +533,7 @@ export function drawCamp(ctx: CanvasRenderingContext2D, f: CampFrame) {
     outlined(ctx, n.npc.name, center(n.x), top, n.npc.kind === "elder" ? "#c9bcff" : "#ffffff", 9);
     if (n.npc.say) bubble(ctx, n.npc.say, center(n.x), top - 10);
   }
-  outlined(ctx, f.playerName, center(f.playerPos.x), f.playerPos.y * CAMP_TILE - 6, f.playerColor, 10);
+  outlined(ctx, f.playerName, center(f.playerPos.x), f.playerPos.y * CAMP_TILE - 6, f.playerColor, 8);
   ctx.restore();
 
   // Soft vignette pulls the eye to the middle of the picture.

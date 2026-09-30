@@ -83,9 +83,12 @@ A Ward Charm makes Cerberus harmless for 15 steps, enough for a Rusty Dagger to 
   A 2-flask delver with no perks banks about 1.9 gold per RF spent (key included); the
   simulated crowd banks 1.4, because real players make mistakes and die.
 - Because everything is shared out, the round always pays back exactly the pool share (67%) of
-  what was spent. Balance is therefore about who takes it: in a mixed crowd an unperked delver
-  gets about 50% of their spend back and the strongest build (Legendary Pathfinder + Hoverer +
-  Friend's Blessing, 3 flasks) about 170%, funded by the others.
+  what was spent. Balance is therefore about who takes it: in a 70/20/10 crowd an unperked
+  delver gets about 52% of their spend back and the strongest build (Legendary Pathfinder +
+  Hoverer + Friend's Blessing, 3 flasks) about 160%, funded by the others. That edge shrinks as
+  more players use it (about 94% when half the crowd does). `npm run economy` regenerates the
+  tables, including how the results move with the crowd's skill and size:
+  [docs/economy-report.md](docs/economy-report.md).
 - Step discounts (Pathfinder, Hoverer) act like extra light, so their total is capped at 45%.
 - `npm test` checks the settlement maths and simulates a mixed crowd.
 
@@ -202,8 +205,12 @@ npm run typecheck
 npm run lint
 npm run build      # static site in dist/ (relative paths, host anywhere)
 node scripts/optimize-maps.mjs  # rebuild public/maps/*.webp from the originals in art-src/maps
+npm run economy    # regenerate docs/economy-report.md (about a minute, deterministic)
 npm run smoke      # headless browser pass; needs `npx playwright install chromium` and a running dev server
 ```
+
+`npm run smoke -- <url>` also works against a deployed build. To use an installed Edge or Chrome
+instead of downloading Chromium, set `SMOKE_CHANNEL=msedge` (or `chrome`).
 
 In dev builds only, `?watch=0xADDRESS` loads that address's Friends without a wallet, which
 helps with testing the blessing. Production builds never grant the blessing in watch mode.
