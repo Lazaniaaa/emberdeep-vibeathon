@@ -55,8 +55,8 @@ Other delvers wander the camp with name tags and chatter, and Old Ember by the g
 **Creatures.** Nine kinds of creature live in the deep (Wickgnaw, Snaretoad, Cinder Hound, Chaincoil,
 Needle Wraith, Sootplate, Hollow Burrower, Fourfold Bell, Rift Leaper), with more of them the deeper you go:
 six on depth 1, one more each depth. They hit back, but never without warning. A creature that reaches you
-*winds up*: the tiles its blow will hit turn red (a line for some, a cross around it for others) for one or two
-turns. Step off the red tiles and the blow lands on nothing, and the creature is left open for a turn. Stay on
+*winds up*: the tiles its blow will hit get a red ring (a line for some, a cross around it for others) for one or two
+turns. Step off the rings and the blow lands on nothing, and the creature is left open for a turn. Stay on
 them and the blow drinks your light. Bump into a creature to attack it; your weapon decides how many swings it
 takes. Kills drop a little gold.
 

@@ -4,6 +4,7 @@ import {
   createPublicClient, defineChain, http, isAddress, parseAbi, parseAbiItem, type Address,
 } from "viem";
 import type { FriendSprite } from "./friend-sprite";
+import { fetchInRanges } from "./log-range";
 export type { FriendSprite } from "./friend-sprite";
 
 export const ROBINHOOD = defineChain({
@@ -27,6 +28,8 @@ const REGISTRY_ABI = parseAbi([
   "function frames(uint8 id, uint32 seed) view returns (uint256[64])",
 ]);
 const TRANSFER = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)");
+/** The collection has no Transfer logs before this block (its first mint is at 63,102,373), so nothing older is scanned. */
+const GENERATIONS_FIRST_BLOCK = 63_000_000n;
 
 export const publicClient = createPublicClient({ chain: ROBINHOOD, transport: http() });
 
@@ -42,11 +45,12 @@ export async function readOwnedFriends(account: Address) {
     address: GENERATIONS, abi: GENERATIONS_ABI, functionName: "balanceOf", args: [account], blockNumber,
   });
   if (balance === 0n) return { friends: [] as OwnedFriend[], hidden: 0 };
-  const query = { address: GENERATIONS, event: TRANSFER, fromBlock: 0n, toBlock: blockNumber, strict: true } as const;
-  const [received, sent] = await Promise.all([
-    publicClient.getLogs({ ...query, args: { to: account } }),
-    publicClient.getLogs({ ...query, args: { from: account } }),
-  ]);
+  // The public RPC refuses log queries that span too many blocks, so the history is read in pieces.
+  const transfers = (args: { from?: Address; to?: Address }) => fetchInRanges(
+    (fromBlock, toBlock) => publicClient.getLogs({ address: GENERATIONS, event: TRANSFER, strict: true, args, fromBlock, toBlock }),
+    GENERATIONS_FIRST_BLOCK, blockNumber,
+  );
+  const [received, sent] = await Promise.all([transfers({ to: account }), transfers({ from: account })]);
   const events = new Map<string, (typeof received)[number]>();
   for (const log of [...received, ...sent]) events.set(`${log.blockNumber}:${log.logIndex}`, log);
   const ordered = [...events.values()].sort((a, b) =>

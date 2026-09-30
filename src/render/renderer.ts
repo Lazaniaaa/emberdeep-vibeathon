@@ -1,8 +1,9 @@
 import { footprint, idx, visibleSet, type Dimling, type FloorTheme, type Point } from "@/game/dungeon";
 import { attackTiles, windupProgress } from "@/game/enemy-ai";
-import { DEFAULT_SPECIES, enemyDef } from "@/game/enemies";
+import { DEFAULT_SPECIES } from "@/game/enemies";
 import { ART_DOORWAYS } from "@/game/map-art";
 import { currentRadius, type RunState } from "@/game/run";
+import { CreatureAnimator, restPose, type Pose } from "./creature-anim";
 import { enemyImage } from "./enemy-art";
 import { DIMLING, ICONS, drawMask, type Mask } from "./sprites";
 
@@ -213,70 +214,109 @@ function drawCerberus(ctx: CanvasRenderingContext2D, d: Dimling, time: number, s
   ctx.fillStyle = "#ffd35a"; ctx.fillText("CERBERUS", ox + 32, oy - 14);
 }
 
+const animator = new CreatureAnimator();
+
 /**
- * A creature: its picture standing on the tile, a health bar, and a bar that shows its attack. The attack bar is empty
- * while it is idle, fills red as it winds up, and shows blue while it recovers and cannot strike.
+ * A creature: its picture on the tile, moved by its pose (glide, hop, turn), a health bar, and a bar that shows its attack.
+ * The attack bar is empty while it is idle, fills red as it winds up, and shows blue while it recovers and cannot strike.
  */
-function drawCreature(ctx: CanvasRenderingContext2D, d: Dimling, time: number, still: boolean) {
-  const def = enemyDef(d.species ?? DEFAULT_SPECIES);
+function drawCreature(ctx: CanvasRenderingContext2D, d: Dimling, pose: Pose, time: number, still: boolean) {
   const image = enemyImage(d.species ?? DEFAULT_SPECIES);
   const size = TILE * 1.6;
-  const cx = d.x * TILE + TILE / 2;
-  const foot = d.y * TILE + TILE - 1;
+  const tileX = pose.x * TILE, tileY = pose.y * TILE;
+  const cx = tileX + TILE / 2 + pose.offX;
+  const foot = tileY + TILE - 1 + pose.offY;
   const phase = d.phase ?? "idle";
-  const bob = still || !d.awake ? 0 : Math.round(Math.sin(time / 230 + d.id) * 1.5);
-  const lunge = phase === "windup" && !still ? Math.round(Math.sin(time / 55) * 1.5) : 0;
 
+  // The shadow stays on the floor and shrinks as the picture leaves it.
   ctx.fillStyle = "rgba(0,0,0,0.4)";
   ctx.beginPath();
-  ctx.ellipse(cx, foot - 1, size * 0.3, 4, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx, foot - 1, size * 0.3 * (1 - Math.min(0.4, pose.lift / 36)), 4, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.save();
-  if (!d.awake) ctx.globalAlpha = 0.72;
-  else if (phase === "recovery") ctx.globalAlpha = 0.6;
   if (image) {
+    ctx.save();
+    if (!d.awake) ctx.globalAlpha = 0.72;
+    else if (phase === "recovery") ctx.globalAlpha = 0.6;
     // The pictures are large pixel art: smoothing keeps their detail when they are drawn small.
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(image, cx - size / 2 + lunge, foot - size * 0.9 + bob, size, size);
+    // It turns on its feet, which sit a little below the middle of the picture.
+    ctx.translate(cx, foot - pose.lift - size * 0.4);
+    ctx.rotate(pose.rot);
+    ctx.scale(pose.sx, pose.sy);
+    ctx.drawImage(image, -size / 2, -size * 0.5, size, size);
+    ctx.restore();
     ctx.imageSmoothingEnabled = false;
   } else {
-    drawMask(ctx, DIMLING[still ? 0 : Math.floor(time / 220 + d.id) % 2], d.x * TILE, d.y * TILE, 2, d.awake ? COLORS.dimling : "#6f6f80", false, "#000");
+    drawMask(ctx, DIMLING[still ? 0 : Math.floor(time / 220 + d.id) % 2], tileX, tileY, 2, d.awake ? COLORS.dimling : "#6f6f80", false, "#000");
   }
-  ctx.restore();
 
   if (!d.awake) {
     ctx.font = "8px Silkscreen, monospace";
     ctx.textAlign = "center";
     ctx.fillStyle = "#9aa0c8";
-    ctx.fillText("z", cx + 10, foot - size * 0.75 + (still ? 0 : Math.round(Math.sin(time / 500 + d.id) * 2)));
+    ctx.fillText("z", cx + 10, foot - size * 0.75 - pose.lift + (still ? 0 : Math.round(Math.sin(time / 500 + d.id) * 2)));
   }
   if (phase === "windup") {
     ctx.font = "14px Silkscreen, monospace";
     ctx.textAlign = "center";
-    const y = foot - size * 0.98 + bob;
+    const y = foot - size * 0.98 - pose.lift;
     ctx.fillStyle = "#000"; ctx.fillText("!", cx + 1, y + 1);
     ctx.fillStyle = "#ff4a2a"; ctx.fillText("!", cx, y);
   }
 
   const w = 28;
-  const bx = cx - w / 2, by = foot + 2;
-  ctx.fillStyle = "#000"; ctx.fillRect(bx - 1, by - 1, w + 2, 5);
-  ctx.fillStyle = "#333"; ctx.fillRect(bx, by, w, 3);
-  ctx.fillStyle = COLORS.sigil; ctx.fillRect(bx, by, Math.max(1, Math.round(w * d.hp / d.maxHp)), 3);
+  const barX = tileX + TILE / 2 - w / 2, by = tileY + TILE + 1;
+  ctx.fillStyle = "#000"; ctx.fillRect(barX - 1, by - 1, w + 2, 5);
+  ctx.fillStyle = "#333"; ctx.fillRect(barX, by, w, 3);
+  ctx.fillStyle = COLORS.sigil; ctx.fillRect(barX, by, Math.max(1, Math.round(w * d.hp / d.maxHp)), 3);
   if (d.awake) {
     const ay = by + 5;
-    ctx.fillStyle = "#000"; ctx.fillRect(bx - 1, ay - 1, w + 2, 5);
-    ctx.fillStyle = "#333"; ctx.fillRect(bx, ay, w, 3);
+    ctx.fillStyle = "#000"; ctx.fillRect(barX - 1, ay - 1, w + 2, 5);
+    ctx.fillStyle = "#333"; ctx.fillRect(barX, ay, w, 3);
     const progress = windupProgress(d);
     if (progress !== null) {
-      ctx.fillStyle = "#ff4a2a"; ctx.fillRect(bx, ay, Math.max(1, Math.round(w * progress)), 3);
+      ctx.fillStyle = "#ff4a2a"; ctx.fillRect(barX, ay, Math.max(1, Math.round(w * progress)), 3);
     } else if (phase === "recovery") {
-      ctx.fillStyle = "#5cc8ff"; ctx.fillRect(bx, ay, w, 3);
+      ctx.fillStyle = "#5cc8ff"; ctx.fillRect(barX, ay, w, 3);
     }
   }
-  void def;
+}
+
+/**
+ * The floor under a blow about to land. The map pictures have their own slabs, which are not the size of a game tile, so
+ * the marks are soft glows with a closing ring instead of hard squares: they read as danger on any floor, and the ring
+ * sits on the tile centre so it is clear which tile is hit.
+ */
+function drawDanger(ctx: CanvasRenderingContext2D, tiles: Point[], progress: number, time: number, still: boolean) {
+  const pulse = still ? 0 : Math.sin(time / 90) * 0.5 + 0.5;
+  const strength = 0.45 + 0.55 * progress;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (const t of tiles) {
+    const cx = t.x * TILE + TILE / 2, cy = t.y * TILE + TILE / 2;
+    const glow = ctx.createRadialGradient(cx, cy, 2, cx, cy, TILE * 0.78);
+    glow.addColorStop(0, `rgba(255,70,40,${0.55 * strength})`);
+    glow.addColorStop(0.65, `rgba(230,40,30,${0.3 * strength})`);
+    glow.addColorStop(1, "rgba(200,20,20,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(cx - TILE, cy - TILE, TILE * 2, TILE * 2);
+  }
+  ctx.globalCompositeOperation = "source-over";
+  for (const t of tiles) {
+    const cx = t.x * TILE + TILE / 2, cy = t.y * TILE + TILE / 2;
+    // The ring closes on the tile centre as the blow gets closer.
+    const r = TILE * (0.44 - 0.18 * progress) + pulse * 1.5;
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(0,0,0,0.5)";
+    ctx.beginPath(); ctx.arc(cx, cy, r + 1.5, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = `rgba(255,${120 + Math.round(80 * pulse)},90,${0.7 + 0.3 * progress})`;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = `rgba(255,230,200,${0.5 + 0.4 * progress})`;
+    ctx.beginPath(); ctx.arc(cx, cy, 2.2, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
 }
 
 /** Small pre-rendered pixel tiles keep the detailed map cheap to redraw during movement. */
@@ -533,26 +573,20 @@ export function drawRun(ctx: CanvasRenderingContext2D, state: RunState, opts: Dr
     ctx.drawImage(itemSprite(item.kind, floor.theme), item.x * TILE, item.y * TILE + bob, TILE, TILE);
   }
 
-  // The tiles a creature is about to hit are marked in red, brighter the closer the blow.
+  // Each creature's picture follows its pose. Reduced motion skips the animation and shows them standing on their tiles.
+  animator.update(`${state.seed}:${floor.depth}`, floor.dimlings, state.player, opts.time);
+  const poseOf = (d: Dimling) => (opts.reducedMotion ? restPose(d) : animator.pose(d, opts.time));
+
+  // The tiles a creature is about to hit are marked in red, stronger the closer the blow.
+  const heroTile = { x: Math.round(opts.playerPos.x), y: Math.round(opts.playerPos.y) };
+  let heroThreat: number | null = null;
   for (const d of floor.dimlings) {
     if (d.boss || d.phase !== "windup") continue;
     const creatureSeen = visible.has(idx(floor, d.x, d.y));
+    const tiles = attackTiles(floor, d).filter(t => creatureSeen || visible.has(idx(floor, t.x, t.y)));
     const progress = windupProgress(d) ?? 0;
-    const pulse = opts.reducedMotion ? 0 : Math.sin(opts.time / 85) * 0.07;
-    for (const t of attackTiles(floor, d)) {
-      if (!creatureSeen && !visible.has(idx(floor, t.x, t.y))) continue;
-      ctx.fillStyle = `rgba(255,50,40,${0.2 + 0.28 * progress + pulse})`;
-      ctx.fillRect(t.x * TILE, t.y * TILE, TILE, TILE);
-      ctx.strokeStyle = `rgba(255,110,80,${0.55 + 0.4 * progress})`;
-      ctx.lineWidth = 2;
-      ctx.strokeRect(t.x * TILE + 1, t.y * TILE + 1, TILE - 2, TILE - 2);
-      ctx.strokeStyle = `rgba(255,220,200,${0.25 + 0.3 * progress})`;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(t.x * TILE + 5, t.y * TILE + 5); ctx.lineTo(t.x * TILE + TILE - 5, t.y * TILE + TILE - 5);
-      ctx.moveTo(t.x * TILE + TILE - 5, t.y * TILE + 5); ctx.lineTo(t.x * TILE + 5, t.y * TILE + TILE - 5);
-      ctx.stroke();
-    }
+    drawDanger(ctx, tiles, progress, opts.time, opts.reducedMotion);
+    if (tiles.some(t => t.x === heroTile.x && t.y === heroTile.y)) heroThreat = Math.max(heroThreat ?? 0, progress);
   }
 
   for (const d of floor.dimlings) {
@@ -561,11 +595,13 @@ export function drawRun(ctx: CanvasRenderingContext2D, state: RunState, opts: Dr
       drawCerberus(ctx, d, opts.time, opts.reducedMotion);
       continue;
     }
-    drawCreature(ctx, d, opts.time, opts.reducedMotion);
+    drawCreature(ctx, d, poseOf(d), opts.time, opts.reducedMotion);
   }
 
   const pp = opts.playerPos;
   drawMask(ctx, opts.heroMask, pp.x * TILE, pp.y * TILE, 2, COLORS.white, opts.flip, "#000");
+  // The hero hides the mark under their feet, so the mark is drawn again over them.
+  if (heroThreat !== null) drawDanger(ctx, [heroTile], heroThreat, opts.time, opts.reducedMotion);
 
   const cx = pp.x * TILE + TILE / 2, cy = pp.y * TILE + TILE / 2;
   const flicker = opts.reducedMotion ? 0 : Math.sin(opts.time / 90) * 3 + Math.sin(opts.time / 37) * 2;
